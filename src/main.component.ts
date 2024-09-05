@@ -1,19 +1,50 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import { ColValidateFunction } from './workflow/validation';
 import { parseExcelFile, parseCsvFile } from './data-parser';
 import { validateData } from './validations';
 
-@customElement('data-import-modal')
-export class DataImportModal extends LitElement {
+const importSteps = ['1:select-file', '2:map-columns', '3:correct-issues'] as const;
+export type ImportSteps = (typeof importSteps)[number];
+
+export interface ImportOptions {
+  fields: {
+    /** Name of the column */
+    label: string;
+    /** Description of the column */
+    description?: string;
+    /** Property this column will be extracted to in result row objects. */
+    key: string;
+    // type: 'string' | 'number' | 'integer' | 'date' | 'boolean' | 'custom';
+    /** A function that validates the column's values and returns an array of errors. */
+    validators?: ColValidateFunction[];
+    /** Alternate field names to assist with matching. */
+    alternates?: string[];
+  }[];
+  text?: {
+    name?: string;
+    fileSelectDescription?: string;
+    mapFieldsDescription?: string;
+    correctErrorsDescription?: string;
+    confirmButtonText?: string;
+    cancelButtonText?: string;
+    nextButtonText?: string;
+    previousButtonText?: string;
+    finishButtonText?: string;
+  };
+}
+
+@customElement('sheetstorm-modal')
+export class SheetstormModal extends LitElement {
   @property({ type: Boolean })
   open = false;
 
-  @property({ type: Array }) schema = [];
+  @property({ type: Array }) schema: any[] = [];
   @state() private step = 1;
-  @state() private columns = [];
-  @state() private data = [];
+  @state() private columns: string[] = [];
+  @state() private data: any[] = [];
   @state() private columnMappings = {};
-  @state() private validationErrors = [];
+  @state() private validationErrors: any[] = [];
 
   static styles = css`
     /* Modal styles here */
@@ -90,7 +121,7 @@ export class DataImportModal extends LitElement {
                             <tr>
                               <td>${col}</td>
                               <td>
-                                <select @change="${(e) => this.handleColumnMappingChange(e, col)}">
+                                <select @change="${(e: Event) => this.handleColumnMappingChange(e, col)}">
                                   ${this.schema.map(
                                     (schemaCol) => html`<option value="${schemaCol.name}">${schemaCol.name}</option>`
                                   )}
@@ -119,7 +150,7 @@ export class DataImportModal extends LitElement {
                                     <input
                                       type="text"
                                       value="${row[col]}"
-                                      @input="${(e) => this.handleEditCell(e, rowIndex, col)}"
+                                      @input="${(e: any) => this.handleEditCell(e, rowIndex, col)}"
                                     />
                                   </td>
                                 `
