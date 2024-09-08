@@ -12,7 +12,12 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "plugins": [
+      {
+        "transform": "./transformer.config.js"
+      }
+    ]
   },
   "include": [
     "src/**/*"
