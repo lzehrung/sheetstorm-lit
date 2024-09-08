@@ -6,4 +6,4 @@ export default {
   component: 'sheetstorm-modal',
 };
 
-export const Default = () => html`<sheetstorm-modal></sheetstorm-modal>`;
+export const Default = () => html`<sheetstorm-modal open="true"></sheetstorm-modal>`;

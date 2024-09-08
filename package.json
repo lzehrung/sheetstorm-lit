@@ -4,7 +4,7 @@
   "description": "A modal component for data import via a guided wizard.",
   "main": "src/index.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.json --watch",
     "test": "jest",
     "dev": "ts-node --project ./dev/server/tsconfig.server.json ./dev/server/server.ts",
     "storybook": "storybook dev -p 6006",
