@@ -54,6 +54,10 @@ export class SheetstormModal extends LitElement {
 
   constructor() {
     super();
+    if (!window.XLSX || !window.Papa) {
+      throw new Error('Sheetstorm requires XLSX and Papa libraries to be loaded globally');
+    }
+
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
     this.fileInput.accept = '.csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';

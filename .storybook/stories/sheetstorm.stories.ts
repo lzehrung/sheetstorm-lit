@@ -1,5 +1,5 @@
 import { html } from 'lit-html';
-import '../../dist'; // Import your Lit component
+import '../../dist/index'; // Import your Lit component
 
 export default {
   title: 'Sheetstorm Import Modal',
