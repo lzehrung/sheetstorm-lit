@@ -1,53 +1,57 @@
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import { ColValidateFunction } from './workflow/validation';
+import {
+  createTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  getFilteredRowModel,
+} from '@tanstack/table-core';
+import type { ColumnDef,Table, CellContext, Row } from '@tanstack/table-core';
+import '@lit-labs/virtualizer';
 import { parseExcelFile, parseCsvFile } from './data-parser';
-import { validateData } from './validations';
-
-const importSteps = ['1:select-file', '2:map-columns', '3:correct-issues'] as const;
-export type ImportSteps = (typeof importSteps)[number];
-
-export interface ImportOptions {
-  fields: {
-    /** Name of the column */
-    label: string;
-    /** Description of the column */
-    description?: string;
-    /** Property this column will be extracted to in result row objects. */
-    key: string;
-    // type: 'string' | 'number' | 'integer' | 'date' | 'boolean' | 'custom';
-    /** A function that validates the column's values and returns an array of errors. */
-    validators?: ColValidateFunction[];
-    /** Alternate field names to assist with matching. */
-    alternates?: string[];
-  }[];
-  text?: {
-    name?: string;
-    fileSelectDescription?: string;
-    mapFieldsDescription?: string;
-    correctErrorsDescription?: string;
-    confirmButtonText?: string;
-    cancelButtonText?: string;
-    nextButtonText?: string;
-    previousButtonText?: string;
-    finishButtonText?: string;
-  };
-}
+import { ImportRow, validateData, ValidateResult, ValidateSchema } from './validations';
+import './workflow/file-select.component';
 
 @customElement('sheetstorm-modal')
-export class SheetstormModal extends LitElement {
+export class SheetstormModal<T extends ImportRow> extends LitElement {
   @property({ type: Boolean })
   open = false;
 
-  @property({ type: Array }) schema: any[] = [];
+  @property({ type: Object, attribute: 'schema' }) schema!: ValidateSchema<T>;
   @state() private step = 1;
   @state() private columns: string[] = [];
-  @state() private data: any[] = [];
-  @state() private columnMappings = {};
-  @state() private validationErrors: any[] = [];
+  @state() private columnMappings!: Record<keyof T, string>;
+  @state() private data: ImportRow[] = [];
+  @state() private validationErrors: ValidateResult<T>[] = [];
+
+  // Table-related states
+  @state() private table!: Table<T>;
+  @state() private globalFilter = '';
 
   static styles = css`
     /* Modal styles here */
+    .modal {
+      /* Your modal styles */
+    }
+    .modal-content {
+      /* Your modal content styles */
+    }
+    /* Add more styles as needed */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+    th {
+      cursor: pointer;
+    }
+    input[type='text'] {
+      width: 100%;
+      box-sizing: border-box;
+    }
   `;
 
   private fileInput: HTMLInputElement;
@@ -64,6 +68,13 @@ export class SheetstormModal extends LitElement {
     this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
   }
 
+  connectedCallback() {
+    super.connectedCallback();
+    if (!this.schema) {
+      throw new Error('Schema is required');
+    }
+  }
+
   private async handleFileSelect(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
@@ -75,7 +86,73 @@ export class SheetstormModal extends LitElement {
       }
       this.columns = Object.keys(this.data[0]);
       this.step = 2;
+      this.initializeTable();
     }
+  }
+
+  get asRowData(): T[] {
+    return this.data as T[];
+  }
+
+  private initializeTable() {
+    const columns: ColumnDef<T>[] = Object.entries(this.schema).map(([key, value]) => ({
+      accessorKey: key as keyof T,
+      header: value.label,
+      cell: (info) => this.renderEditableCell(info),
+    }));
+
+    this.table = createTable<T>({
+      data: this.asRowData,
+      columns,
+      getCoreRowModel: getCoreRowModel(),
+      getSortedRowModel: getSortedRowModel(),
+      getFilteredRowModel: getFilteredRowModel(),
+      state: {
+        sorting: [],
+        globalFilter: this.globalFilter,
+      },
+      onSortingChange: (sorting) => {
+        this.table.setSorting(sorting);
+      },
+      onGlobalFilterChange: (filter: string) => {
+        this.globalFilter = filter;
+        this.table.setGlobalFilter(filter);
+      },
+      // Add the missing properties below
+      onStateChange: () => {
+        // Handle state changes if necessary
+        this.requestUpdate();
+      },
+      renderFallbackValue: () => html`<div>Loading...</div>`,
+    });
+
+    this.requestUpdate();
+  }
+
+  private renderEditableCell(info: CellContext<T, unknown>): TemplateResult {
+    const row = info.row.original;
+    const columnId = info.column.id;
+    return html`<input
+      type="text"
+      .value="${row[columnId]}"
+      @input="${(e: Event) => this.handleEditCell(e, info.row.index, columnId)}"
+    />`;
+  }
+
+  private handleEditCell(event: Event, rowIndex: number, column: string) {
+    const input = event.target as HTMLInputElement;
+    const value = input.value;
+    this.data = [
+      ...this.data.slice(0, rowIndex),
+      { ...this.data[rowIndex], [column]: value },
+      ...this.data.slice(rowIndex + 1),
+    ];
+    const rowValidationErrors = validateData(this.data, this.schema, this.columnMappings);
+    this.validationErrors = [
+      ...this.validationErrors,
+      ...rowValidationErrors,
+    ];
+    this.initializeTable(); // Re-initialize table with updated data
   }
 
   private handleColumnMappingChange(event: Event, sourceColumn: string) {
@@ -93,10 +170,84 @@ export class SheetstormModal extends LitElement {
     }
   }
 
-  private handleEditCell(event: Event, rowIndex: number, column: string) {
-    const value = (event.target as HTMLInputElement).value;
-    this.data[rowIndex][column] = value;
-    this.validationErrors = validateData(this.data, this.schema, this.columnMappings);
+  renderTable() {
+    if (!this.table) return html``;
+
+    return html`
+      <input
+        type="text"
+        placeholder="Search..."
+        @input="${(e: Event) => this.table.setGlobalFilter((e.target as HTMLInputElement).value)}"
+      />
+      <table>
+        <thead>
+          ${this.table.getHeaderGroups().map(
+      (headerGroup) => html`
+              <tr>
+                ${headerGroup.headers.map(
+        (header) => html`
+                    <th @click="${() => this.handleSort(header.column.id)}">
+                      ${header.column.columnDef.header}
+                      ${this.getSortIndicator(header.column.getIsSorted())}
+                    </th>
+                  `
+      )}
+              </tr>
+            `
+    )}
+        </thead>
+        <tbody>
+          <lit-virtualizer
+            items="${this.table.getRowModel().rows}"
+            scroller
+            style="height: 400px; overflow: auto;"
+            .renderItem="${(row: Row<T>) => this.renderTableRow(row)}"
+          ></lit-virtualizer>
+        </tbody>
+      </table>
+    `;
+  }
+
+  private renderTableRow(row: Row<T>): TemplateResult {
+    return html`
+      <tr>
+        ${row.getVisibleCells().map(
+      (cell) => html`<td>${cell.getValue()}</td>`
+    )}
+      </tr>
+    `;
+  }
+
+  private handleSort(columnId: string) {
+    const isSorted = this.table.getColumn(columnId)?.getIsSorted();
+    let newSort = [];
+
+    if (isSorted === 'asc') {
+      newSort = [{ id: columnId, desc: true }];
+    } else {
+      newSort = [{ id: columnId, desc: false }];
+    }
+
+    this.table.setSorting(newSort);
+    this.requestUpdate();
+  }
+
+  private getSortIndicator(isSorted: false | 'asc' | 'desc'): string {
+    if (isSorted === 'asc') return ' 🔼';
+    if (isSorted === 'desc') return ' 🔽';
+    return '';
+  }
+
+  private handleFileParsed(event: CustomEvent) {
+    this.data = event.detail;
+    this.columns = Object.keys(this.data[0]);
+    this.step = 2;
+    this.initializeTable();
+  }
+
+  private handleFileError(event: CustomEvent) {
+    console.error('File parsing error:', event.detail);
+    // Handle error UI feedback if needed
   }
 
   render() {
@@ -107,13 +258,16 @@ export class SheetstormModal extends LitElement {
               <div class="modal-content">
                 <span class="close" @click="${() => (this.open = false)}">&times;</span>
                 ${this.step === 1
-                  ? html`
+            ? html`
                       <h2>Import Data</h2>
-                      <button @click="${() => this.fileInput.click()}">Upload File</button>
+                      <file-select-component
+                        @file-parsed="${this.handleFileParsed}"
+                        @error="${this.handleFileError}"
+                      ></file-select-component>
                     `
-                  : ''}
+            : ''}
                 ${this.step === 2
-                  ? html`
+            ? html`
                       <h2>Map Columns</h2>
                       <table>
                         <tr>
@@ -121,51 +275,31 @@ export class SheetstormModal extends LitElement {
                           <th>Target Column</th>
                         </tr>
                         ${this.columns.map(
-                          (col) => html`
+              (col) => html`
                             <tr>
                               <td>${col}</td>
                               <td>
                                 <select @change="${(e: Event) => this.handleColumnMappingChange(e, col)}">
-                                  ${this.schema.map(
-                                    (schemaCol) => html`<option value="${schemaCol.name}">${schemaCol.name}</option>`
-                                  )}
+                                  <option value="">--Select--</option>
+                                  ${Object.entries(this.schema).map(
+                ([key, col]) => html`<option value="${key}">${col.label}</option>`
+              )}
                                 </select>
                               </td>
                             </tr>
                           `
-                        )}
+            )}
                       </table>
                       <button @click="${this.handleConfirmColumnMapping}">Confirm Mapping</button>
                     `
-                  : ''}
+            : ''}
                 ${this.step === 3
-                  ? html`
+            ? html`
                       <h2>Validation Errors</h2>
-                      <table>
-                        <tr>
-                          ${Object.keys(this.data[0]).map((col) => html`<th>${col}</th>`)}
-                        </tr>
-                        ${this.validationErrors.map(
-                          (row, rowIndex) => html`
-                            <tr>
-                              ${Object.keys(row).map(
-                                (col) => html`
-                                  <td>
-                                    <input
-                                      type="text"
-                                      value="${row[col]}"
-                                      @input="${(e: any) => this.handleEditCell(e, rowIndex, col)}"
-                                    />
-                                  </td>
-                                `
-                              )}
-                            </tr>
-                          `
-                        )}
-                      </table>
+                      ${this.renderTable()}
                       <button @click="${this.handleConfirmColumnMapping}">Revalidate</button>
                     `
-                  : ''}
+            : ''}
               </div>
             </div>
           `

@@ -1,5 +1,3 @@
-import { parseDate } from './utils';
-
 export interface ValidationError<T extends ImportRow> {
   key: keyof T;
   message: string;
@@ -11,27 +9,34 @@ export interface ValidateResult<T extends ImportRow> {
   errors: ValidationError<T>[];
 }
 
-export type ImportRow = { [key: string | number]: string | number };
+export type ImportRow = { [key: string | number]: string };
 
-export type ValidatorFunc = (value: string | number) => { isValid: boolean; message: string };
+export type ValidatorFunc = (value: string) => { isValid: boolean; message: string; };
+
+export type ValidateSchema<T extends ImportRow> = Record<keyof T, {
+  label: string;
+  type: 'string' | 'number' | 'date' | 'boolean';
+  valid: ValidatorFunc;
+}>;
 
 export function validateData<T extends ImportRow>(
-  data: Record<string, string | number>[],
-  schema: Record<keyof T, ValidatorFunc>,
+  data: Record<string, string>[],
+  schema: ValidateSchema<T>,
   columnMappings: Record<keyof T, string>
 ): ValidateResult<T>[] {
   const allErrors: ValidateResult<T>[] = [];
   data.forEach((row, rowIndex) => {
     const rowErrors: ValidationError<T>[] = [];
-    Object.entries(schema).forEach(([destProp, validator]) => {
+    Object.entries(schema).forEach(([destProp, schema]) => {
       const srcProp = columnMappings[destProp];
       const value = row[srcProp];
 
-      const result = validator(value);
+      const result = schema.valid(value);
       if (!result.isValid) {
         rowErrors.push({ key: destProp, message: result.message });
       }
     });
+    allErrors.push({ rowIndex, isValid: rowErrors.length === 0, errors: rowErrors });
   });
   return allErrors;
 }
