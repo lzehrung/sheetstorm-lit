@@ -10,5 +10,6 @@ const config: StorybookConfig = {
     name: '@storybook/web-components-vite',
     options: {},
   },
+  staticDirs: ['../dist'],
 };
 export default config;

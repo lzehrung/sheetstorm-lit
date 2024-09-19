@@ -3,13 +3,14 @@ import { ImportRow, validateData, ValidateSchema } from '../src/validations';
 interface TestRow extends ImportRow {
   name: string;
   age: number;
+  email: string;
 }
 
 describe('Validation Tests', () => {
   test('validateData should validate data against schema and column mappings correctly', () => {
-    const data = [
-      { col1: 'John', col2: '30', col3: 'j@test.com' },
-      { col1: 'Doe', col2: 'thirty', col3: 'd@test.com' },
+    const data: ImportRow[] = [
+      { name: 'John', age: 30, email: 'j@test.com' },
+      { name: 'Doe', age: 'thirty', email: 'd@test.com' },
     ];
     const schema: ValidateSchema<TestRow> = {
       name: {
@@ -34,8 +35,8 @@ describe('Validation Tests', () => {
         }
       },
     };
-    const columnMappings = { name: 'col1', age: 'col2', email: 'col3' };
-    const result = validateData(data, schema, columnMappings);
+    const result = validateData(data, schema);
+    expect(result.length).toBe(1);
     expect(result).toEqual([{ age: 'thirty', rowIndex: 1 }]);
   });
 });

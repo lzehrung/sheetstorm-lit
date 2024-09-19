@@ -1,13 +1,7 @@
-import { LitElement, html, css, TemplateResult } from 'lit';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
-import {
-  createTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  getFilteredRowModel,
-} from '@tanstack/table-core';
-import type { ColumnDef,Table, CellContext, Row } from '@tanstack/table-core';
-import '@lit-labs/virtualizer';
+import '@vaadin/grid';
 import { parseExcelFile, parseCsvFile } from './data-parser';
 import { ImportRow, validateData, ValidateResult, ValidateSchema } from './validations';
 import './workflow/file-select.component';
@@ -18,15 +12,13 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
   open = false;
 
   @property({ type: Object, attribute: 'schema' }) schema!: ValidateSchema<T>;
+
   @state() private step = 1;
   @state() private columns: string[] = [];
-  @state() private columnMappings!: Record<keyof T, string>;
+  @state() private columnMappings: Partial<Record<keyof T, string>> = {};
   @state() private data: ImportRow[] = [];
   @state() private validationErrors: ValidateResult<T>[] = [];
-
-  // Table-related states
-  @state() private table!: Table<T>;
-  @state() private globalFilter = '';
+  @state() private transformedData: T[] = []; // State for transformed data
 
   static styles = css`
     /* Modal styles here */
@@ -37,20 +29,33 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
       /* Your modal content styles */
     }
     /* Add more styles as needed */
-    table {
+    vaadin-grid {
       width: 100%;
-      border-collapse: collapse;
+      height: 400px;
     }
-    th, td {
+    vaadin-grid-cell-content {
       padding: 8px;
-      border: 1px solid #ddd;
-    }
-    th {
-      cursor: pointer;
+      box-sizing: border-box;
     }
     input[type='text'] {
       width: 100%;
       box-sizing: border-box;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th,
+    td {
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+    select {
+      width: 100%;
+    }
+    button {
+      margin-top: 16px;
+      padding: 8px 16px;
     }
   `;
 
@@ -59,13 +64,19 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
   constructor() {
     super();
     if (!window.XLSX || !window.Papa) {
-      throw new Error('Sheetstorm requires XLSX and Papa libraries to be loaded globally');
+      throw new Error(
+        'Sheetstorm requires XLSX and Papa libraries to be loaded globally'
+      );
     }
 
     this.fileInput = document.createElement('input');
     this.fileInput.type = 'file';
-    this.fileInput.accept = '.csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    this.fileInput.addEventListener('change', this.handleFileSelect.bind(this));
+    this.fileInput.accept =
+      '.csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    this.fileInput.addEventListener(
+      'change',
+      this.handleFileSelect.bind(this)
+    );
   }
 
   connectedCallback() {
@@ -79,175 +90,156 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
       const file = input.files[0];
-      if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+      if (
+        file.type ===
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      ) {
         this.data = await parseExcelFile(file);
       } else if (file.type === 'text/csv') {
         this.data = await parseCsvFile(file);
       }
-      this.columns = Object.keys(this.data[0]);
+      this.columns = Object.keys(this.data[0] || {});
       this.step = 2;
-      this.initializeTable();
+      this.requestUpdate();
     }
   }
 
   get asRowData(): T[] {
-    return this.data as T[];
+    return this.transformedData as T[];
   }
 
-  private initializeTable() {
-    const columns: ColumnDef<T>[] = Object.entries(this.schema).map(([key, value]) => ({
-      accessorKey: key as keyof T,
-      header: value.label,
-      cell: (info) => this.renderEditableCell(info),
-    }));
+  private handleCellEdit(event: CustomEvent) {
+    const { path, field, value } = event.detail;
+    if (this.transformedData[path]) {
+      this.transformedData[path][field] = value;
+      this.requestUpdate();
+    }
+  }
 
-    this.table = createTable<T>({
-      data: this.asRowData,
-      columns,
-      getCoreRowModel: getCoreRowModel(),
-      getSortedRowModel: getSortedRowModel(),
-      getFilteredRowModel: getFilteredRowModel(),
-      state: {
-        sorting: [],
-        globalFilter: this.globalFilter,
-      },
-      onSortingChange: (sorting) => {
-        this.table.setSorting(sorting);
-      },
-      onGlobalFilterChange: (filter: string) => {
-        this.globalFilter = filter;
-        this.table.setGlobalFilter(filter);
-      },
-      // Add the missing properties below
-      onStateChange: () => {
-        // Handle state changes if necessary
-        this.requestUpdate();
-      },
-      renderFallbackValue: () => html`<div>Loading...</div>`,
+  private handleColumnMappingChange(
+    event: Event,
+    sourceColumn: string
+  ): void {
+    const targetColumn = (event.target as HTMLSelectElement).value;
+    if (targetColumn) {
+      // Ensure the targetColumn is a valid key in the schema
+      if (targetColumn in this.schema) {
+        this.columnMappings = {
+          ...this.columnMappings,
+          [sourceColumn as keyof T]: targetColumn,
+        };
+      }
+    } else {
+      // Remove the mapping if no target is selected
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [sourceColumn as keyof T]: _, ...rest } = this.columnMappings;
+      this.columnMappings = rest as Partial<Record<keyof T, string>>;
+    }
+  }
+
+  private handleConfirmColumnMapping(): void {
+    // Ensure all required schema fields are mapped
+    const requiredFields = Object.keys(this.schema) as (keyof T)[];
+    const mappedFields = Object.values(this.columnMappings);
+    const unmappedFields = requiredFields.filter(
+      (field) => !mappedFields.includes(field as string)
+    );
+
+    if (unmappedFields.length > 0) {
+      alert(
+        `Please map all required fields: ${unmappedFields
+          .map((f) => this.schema[f].label)
+          .join(', ')}`
+      );
+      return;
+    }
+
+    // Transform data based on columnMappings
+    this.transformedData = this.data.map((item) => {
+      const transformedItem: any = {};
+      for (const [sourceKey, targetKey] of Object.entries(this.columnMappings)) {
+        transformedItem[targetKey] = item[sourceKey];
+      }
+      return transformedItem as T;
     });
 
-    this.requestUpdate();
-  }
+    // Validate the transformed data
+    this.validationErrors = validateData(this.transformedData, this.schema).filter(
+      (error) => !error.isValid
+    );
 
-  private renderEditableCell(info: CellContext<T, unknown>): TemplateResult {
-    const row = info.row.original;
-    const columnId = info.column.id;
-    return html`<input
-      type="text"
-      .value="${row[columnId]}"
-      @input="${(e: Event) => this.handleEditCell(e, info.row.index, columnId)}"
-    />`;
-  }
-
-  private handleEditCell(event: Event, rowIndex: number, column: string) {
-    const input = event.target as HTMLInputElement;
-    const value = input.value;
-    this.data = [
-      ...this.data.slice(0, rowIndex),
-      { ...this.data[rowIndex], [column]: value },
-      ...this.data.slice(rowIndex + 1),
-    ];
-    const rowValidationErrors = validateData(this.data, this.schema, this.columnMappings);
-    this.validationErrors = [
-      ...this.validationErrors,
-      ...rowValidationErrors,
-    ];
-    this.initializeTable(); // Re-initialize table with updated data
-  }
-
-  private handleColumnMappingChange(event: Event, sourceColumn: string) {
-    const targetColumn = (event.target as HTMLSelectElement).value;
-    this.columnMappings = { ...this.columnMappings, [sourceColumn]: targetColumn };
-  }
-
-  private handleConfirmColumnMapping() {
-    this.validationErrors = validateData(this.data, this.schema, this.columnMappings).filter((error) => !error.isValid);
     if (this.validationErrors.length > 0) {
       this.step = 3;
     } else {
-      this.dispatchEvent(new CustomEvent('data-import-success', { detail: this.data }));
+      this.dispatchEvent(
+        new CustomEvent('data-import-success', { detail: this.transformedData })
+      );
       this.open = false;
     }
   }
 
-  renderTable() {
-    if (!this.table) return html``;
-
-    return html`
-      <input
-        type="text"
-        placeholder="Search..."
-        @input="${(e: Event) => this.table.setGlobalFilter((e.target as HTMLInputElement).value)}"
-      />
-      <table>
-        <thead>
-          ${this.table.getHeaderGroups().map(
-      (headerGroup) => html`
-              <tr>
-                ${headerGroup.headers.map(
-        (header) => html`
-                    <th @click="${() => this.handleSort(header.column.id)}">
-                      ${header.column.columnDef.header}
-                      ${this.getSortIndicator(header.column.getIsSorted())}
-                    </th>
-                  `
-      )}
-              </tr>
-            `
-    )}
-        </thead>
-        <tbody>
-          <lit-virtualizer
-            items="${this.table.getRowModel().rows}"
-            scroller
-            style="height: 400px; overflow: auto;"
-            .renderItem="${(row: Row<T>) => this.renderTableRow(row)}"
-          ></lit-virtualizer>
-        </tbody>
-      </table>
-    `;
-  }
-
-  private renderTableRow(row: Row<T>): TemplateResult {
-    return html`
-      <tr>
-        ${row.getVisibleCells().map(
-      (cell) => html`<td>${cell.getValue()}</td>`
-    )}
-      </tr>
-    `;
-  }
-
-  private handleSort(columnId: string) {
-    const isSorted = this.table.getColumn(columnId)?.getIsSorted();
-    let newSort = [];
-
-    if (isSorted === 'asc') {
-      newSort = [{ id: columnId, desc: true }];
-    } else {
-      newSort = [{ id: columnId, desc: false }];
+  private handleSort(event: Event): void {
+    const grid = event.currentTarget as any;
+    const column = event.target as any;
+    const path = column.closest('vaadin-grid-column');
+    if (path) {
+      const direction = path.getAttribute('sort-direction');
+      const newDirection = direction === 'asc' ? 'desc' : 'asc';
+      grid.columns.forEach((col: any) =>
+        col.removeAttribute('sort-direction')
+      );
+      path.setAttribute('sort-direction', newDirection);
+      // Implement sorting logic based on newDirection
+      // This may require additional state management
     }
-
-    this.table.setSorting(newSort);
-    this.requestUpdate();
   }
 
-  private getSortIndicator(isSorted: false | 'asc' | 'desc'): string {
-    if (isSorted === 'asc') return ' 🔼';
-    if (isSorted === 'desc') return ' 🔽';
-    return '';
+  private renderGrid(): unknown {
+    return html`
+      <vaadin-grid
+        .items="${this.transformedData}"
+        theme="no-border"
+        @active-item-changed="${(e: any) =>
+          this.handleCellEdit(e.detail.value)}"
+      >
+        ${Object.entries(this.schema).map(
+          ([key, colConfig]) => html`
+            <vaadin-grid-column
+              path="${key}"
+              header="${colConfig.label}"
+              .renderer="${this.gridRenderer}"
+              @sort="${this.handleSort}"
+            ></vaadin-grid-column>
+          `
+        )}
+      </vaadin-grid>
+    `;
   }
 
-  private handleFileParsed(event: CustomEvent) {
-    this.data = event.detail;
-    this.columns = Object.keys(this.data[0]);
-    this.step = 2;
-    this.initializeTable();
-  }
-
-  private handleFileError(event: CustomEvent) {
-    console.error('File parsing error:', event.detail);
-    // Handle error UI feedback if needed
+  private gridRenderer(
+    root: HTMLElement,
+    column: any,
+    rowData: any
+  ): void {
+    if (!root.firstElementChild) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = rowData.item[column.path] || '';
+      input.addEventListener('input', (e: Event) => {
+        const target = e.target as HTMLInputElement;
+        const customEvent = new CustomEvent('cell-edit', {
+          detail: {
+            path: rowData.index,
+            field: column.path,
+            value: target.value,
+          },
+          bubbles: true,
+          composed: true,
+        });
+        root.dispatchEvent(customEvent);
+      });
+      root.appendChild(input);
+    }
   }
 
   render() {
@@ -256,54 +248,90 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
         ? html`
             <div class="modal">
               <div class="modal-content">
-                <span class="close" @click="${() => (this.open = false)}">&times;</span>
+                <span class="close" @click="${() => (this.open = false)}
+                  ">&times;</span
+                >
                 ${this.step === 1
-            ? html`
+                  ? html`
                       <h2>Import Data</h2>
                       <file-select-component
                         @file-parsed="${this.handleFileParsed}"
                         @error="${this.handleFileError}"
                       ></file-select-component>
                     `
-            : ''}
+                  : ''}
                 ${this.step === 2
-            ? html`
+                  ? html`
                       <h2>Map Columns</h2>
                       <table>
-                        <tr>
-                          <th>Source Column</th>
-                          <th>Target Column</th>
-                        </tr>
-                        ${this.columns.map(
-              (col) => html`
-                            <tr>
-                              <td>${col}</td>
-                              <td>
-                                <select @change="${(e: Event) => this.handleColumnMappingChange(e, col)}">
-                                  <option value="">--Select--</option>
-                                  ${Object.entries(this.schema).map(
-                ([key, col]) => html`<option value="${key}">${col.label}</option>`
-              )}
-                                </select>
-                              </td>
-                            </tr>
-                          `
-            )}
+                        <thead>
+                          <tr>
+                            <th>Source Column</th>
+                            <th>Target Column</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${this.columns.map(
+                            (col) => html`
+                              <tr>
+                                <td>${col}</td>
+                                <td>
+                                  <select
+                                    @change="${(e: Event) =>
+                                      this.handleColumnMappingChange(e, col)}"
+                                    .value="${this.columnMappings[
+                                      col as keyof T
+                                    ] || ''}"
+                                  >
+                                    <option value="">--Select--</option>
+                                    ${Object.entries(this.schema).map(
+                                      ([key, colSchema]) => html`<option
+                                        value="${key}"
+                                        ?selected="${this.columnMappings[
+                                          col as keyof T
+                                        ] === key}"
+                                      >
+                                        ${colSchema.label}
+                                      </option>`
+                                    )}
+                                  </select>
+                                </td>
+                              </tr>
+                            `
+                          )}
+                        </tbody>
                       </table>
-                      <button @click="${this.handleConfirmColumnMapping}">Confirm Mapping</button>
+                      <button @click="${this.handleConfirmColumnMapping}">
+                        Confirm Mapping
+                      </button>
                     `
-            : ''}
+                  : ''}
                 ${this.step === 3
-            ? html`
+                  ? html`
                       <h2>Validation Errors</h2>
-                      ${this.renderTable()}
-                      <button @click="${this.handleConfirmColumnMapping}">Revalidate</button>
+                      ${this.renderGrid()}
+                      <button @click="${this.handleConfirmColumnMapping}">
+                        Revalidate
+                      </button>
                     `
-            : ''}
+                  : ''}
               </div>
             </div>
           `
         : ''}
     `;
+  }
+
+  private handleFileParsed(event: CustomEvent) {
+    this.data = event.detail;
+    this.columns = Object.keys(this.data[0] || {});
+    this.step = 2;
+    this.requestUpdate();
+  }
+
+  private handleFileError(event: CustomEvent) {
+    console.error('File parsing error:', event.detail);
+    alert('An error occurred while parsing the file.');
+    // Handle error UI feedback if needed
   }
 }
