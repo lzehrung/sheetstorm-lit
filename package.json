@@ -6,6 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "build": "npx rollup -c",
+    "dev": "npx rollup -cw",
     "build:all": "npm run build && npm run storybook:build",
     "test": "jest",
     "storybook": "npm run storybook:build && npm run storybook:serve",

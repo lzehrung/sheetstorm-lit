@@ -161,7 +161,7 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
   }
 
   private handleConfirmColumnMapping() {
-    this.validationErrors = validateData(this.data, this.schema, this.columnMappings);
+    this.validationErrors = validateData(this.data, this.schema, this.columnMappings).filter((error) => !error.isValid);
     if (this.validationErrors.length > 0) {
       this.step = 3;
     } else {

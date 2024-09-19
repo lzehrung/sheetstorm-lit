@@ -15,7 +15,7 @@ const schema: ValidateSchema<{
     label: 'Name',
     type: 'string',
     valid: (value) => {
-      if (value.length === 0) {
+      if (!value) {
         return {
           isValid: false,
           message: 'Name is required',
@@ -30,7 +30,7 @@ const schema: ValidateSchema<{
     label: 'Email',
     type: 'string',
     valid: (value) => {
-      if (value.length === 0) {
+      if (!value) {
         return {
           isValid: false,
           message: 'Email is required',

@@ -38,4 +38,8 @@ exports.default = {
       brotliSize: true,
     }),
   ],
+  watch: {
+    include: 'src/**',
+    exclude: 'node_modules/**'
+  },
 };

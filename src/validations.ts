@@ -1,6 +1,6 @@
 export interface ValidationError<T extends ImportRow> {
   key: keyof T;
-  message: string;
+  message?: string;
 }
 
 export interface ValidateResult<T extends ImportRow> {
@@ -9,9 +9,9 @@ export interface ValidateResult<T extends ImportRow> {
   errors: ValidationError<T>[];
 }
 
-export type ImportRow = { [key: string | number]: string };
+export type ImportRow = { [key: string | number]: unknown };
 
-export type ValidatorFunc = (value: string) => { isValid: boolean; message: string; };
+export type ValidatorFunc = (value: string) => { isValid: boolean; message?: string; };
 
 export type ValidateSchema<T extends ImportRow> = Record<keyof T, {
   label: string;
@@ -20,7 +20,8 @@ export type ValidateSchema<T extends ImportRow> = Record<keyof T, {
 }>;
 
 export function validateData<T extends ImportRow>(
-  data: Record<string, string>[],
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any[],
   schema: ValidateSchema<T>,
   columnMappings: Record<keyof T, string>
 ): ValidateResult<T>[] {
