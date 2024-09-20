@@ -2,31 +2,49 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '@vaadin/grid';
-import { parseExcelFile, parseCsvFile } from './data-parser';
-import { ImportRow, validateData, ValidateResult, ValidateSchema } from './validations';
+import { validateData, ValidateResult, ValidateSchema } from './validations';
 import './workflow/file-select.component';
 
 @customElement('sheetstorm-modal')
-export class SheetstormModal<T extends ImportRow> extends LitElement {
+export class SheetstormModal extends LitElement {
   @property({ type: Boolean })
   open = false;
 
-  @property({ type: Object, attribute: 'schema' }) schema!: ValidateSchema<T>;
+  @property({ type: Object, attribute: 'schema' }) schema!: ValidateSchema;
 
   @state() private step = 1;
   @state() private columns: string[] = [];
-  @state() private columnMappings: Partial<Record<keyof T, string>> = {};
-  @state() private data: ImportRow[] = [];
-  @state() private validationErrors: ValidateResult<T>[] = [];
-  @state() private transformedData: T[] = []; // State for transformed data
+  @state() private columnMappings: Record<string, string> = {}; // Source column index to schema key
+  @state() private data: string[][] = [];
+  @state() private validationErrors: ValidateResult[] = [];
+  @state() private transformedData: Record<string, string>[] = []; // Transformed data per schema
 
   static styles = css`
     /* Modal styles here */
     .modal {
       /* Your modal styles */
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
     }
     .modal-content {
-      /* Your modal content styles */
+      background: white;
+      padding: 20px;
+      border-radius: 5px;
+      width: 80%;
+      max-height: 90%;
+      overflow-y: auto;
+    }
+    .close {
+      float: right;
+      cursor: pointer;
+      font-size: 1.5em;
     }
     /* Add more styles as needed */
     vaadin-grid {
@@ -59,24 +77,9 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
     }
   `;
 
-  private fileInput: HTMLInputElement;
-
   constructor() {
     super();
-    if (!window.XLSX || !window.Papa) {
-      throw new Error(
-        'Sheetstorm requires XLSX and Papa libraries to be loaded globally'
-      );
-    }
-
-    this.fileInput = document.createElement('input');
-    this.fileInput.type = 'file';
-    this.fileInput.accept =
-      '.csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    this.fileInput.addEventListener(
-      'change',
-      this.handleFileSelect.bind(this)
-    );
+    // Removed direct fileInput handling
   }
 
   connectedCallback() {
@@ -86,34 +89,18 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
     }
   }
 
-  private async handleFileSelect(event: Event) {
-    const input = event.target as HTMLInputElement;
-    if (input.files && input.files.length > 0) {
-      const file = input.files[0];
-      if (
-        file.type ===
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      ) {
-        this.data = await parseExcelFile(file);
-      } else if (file.type === 'text/csv') {
-        this.data = await parseCsvFile(file);
-      }
-      this.columns = Object.keys(this.data[0] || {});
-      this.step = 2;
-      this.requestUpdate();
-    }
+  private async handleFileParsed(event: CustomEvent<string[][]>) {
+    this.data = event.detail;
+    // Assign column indices as names
+    this.columns = this.data[0].map((_, index) => `Column ${index + 1}`);
+    this.step = 2;
+    this.requestUpdate();
   }
 
-  get asRowData(): T[] {
-    return this.transformedData as T[];
-  }
-
-  private handleCellEdit(event: CustomEvent) {
-    const { path, field, value } = event.detail;
-    if (this.transformedData[path]) {
-      this.transformedData[path][field] = value;
-      this.requestUpdate();
-    }
+  private handleFileError(event: CustomEvent) {
+    console.error('File parsing error:', event.detail);
+    alert('An error occurred while parsing the file.');
+    // Handle error UI feedback if needed
   }
 
   private handleColumnMappingChange(
@@ -124,25 +111,21 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
     if (targetColumn) {
       // Ensure the targetColumn is a valid key in the schema
       if (targetColumn in this.schema) {
-        this.columnMappings = {
-          ...this.columnMappings,
-          [sourceColumn as keyof T]: targetColumn,
-        };
+        this.columnMappings[sourceColumn] = targetColumn;
       }
     } else {
       // Remove the mapping if no target is selected
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { [sourceColumn as keyof T]: _, ...rest } = this.columnMappings;
-      this.columnMappings = rest as Partial<Record<keyof T, string>>;
+      delete this.columnMappings[sourceColumn];
     }
+    this.requestUpdate();
   }
 
   private handleConfirmColumnMapping(): void {
     // Ensure all required schema fields are mapped
-    const requiredFields = Object.keys(this.schema) as (keyof T)[];
+    const requiredFields = Object.keys(this.schema);
     const mappedFields = Object.values(this.columnMappings);
     const unmappedFields = requiredFields.filter(
-      (field) => !mappedFields.includes(field as string)
+      (field) => !mappedFields.includes(field)
     );
 
     if (unmappedFields.length > 0) {
@@ -154,27 +137,41 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
       return;
     }
 
-    // Transform data based on columnMappings
-    this.transformedData = this.data.map((item) => {
-      const transformedItem: any = {};
-      for (const [sourceKey, targetKey] of Object.entries(this.columnMappings)) {
-        transformedItem[targetKey] = item[sourceKey];
-      }
-      return transformedItem as T;
-    });
+    // Validate the data
+    const validationResults = validateData(this.data, this.schema, this.columnMappings);
 
-    // Validate the transformed data
-    this.validationErrors = validateData(this.transformedData, this.schema).filter(
-      (error) => !error.isValid
+    // Filter out valid rows
+    this.validationErrors = validationResults.filter(
+      (result) => !result.isValid
     );
 
     if (this.validationErrors.length > 0) {
       this.step = 3;
     } else {
-      this.dispatchEvent(
-        new CustomEvent('data-import-success', { detail: this.transformedData })
-      );
-      this.open = false;
+      this.transformData();
+    }
+  }
+
+  private transformData(): void {
+    this.transformedData = this.data.map(row => {
+      const obj: Record<string, string> = {};
+      Object.entries(this.columnMappings).forEach(([sourceCol, schemaKey]) => {
+        obj[schemaKey] = row[parseInt(sourceCol, 10)] || '';
+      });
+      return obj;
+    });
+
+    this.dispatchEvent(
+      new CustomEvent('data-import-success', { detail: this.transformedData })
+    );
+    this.open = false;
+  }
+
+  private handleCellEdit(event: CustomEvent) {
+    const { rowIndex, key, value } = event.detail;
+    if (this.transformedData[rowIndex]) {
+      this.transformedData[rowIndex][key] = value;
+      this.requestUpdate();
     }
   }
 
@@ -229,8 +226,8 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
         const target = e.target as HTMLInputElement;
         const customEvent = new CustomEvent('cell-edit', {
           detail: {
-            path: rowData.index,
-            field: column.path,
+            rowIndex: rowData.index,
+            key: column.path,
             value: target.value,
           },
           bubbles: true,
@@ -272,24 +269,20 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
                         </thead>
                         <tbody>
                           ${this.columns.map(
-                            (col) => html`
+                            (col, index) => html`
                               <tr>
                                 <td>${col}</td>
                                 <td>
                                   <select
                                     @change="${(e: Event) =>
-                                      this.handleColumnMappingChange(e, col)}"
-                                    .value="${this.columnMappings[
-                                      col as keyof T
-                                    ] || ''}"
+                                      this.handleColumnMappingChange(e, index.toString())}"
+                                    .value="${this.columnMappings[index.toString()] || ''}"
                                   >
                                     <option value="">--Select--</option>
                                     ${Object.entries(this.schema).map(
                                       ([key, colSchema]) => html`<option
                                         value="${key}"
-                                        ?selected="${this.columnMappings[
-                                          col as keyof T
-                                        ] === key}"
+                                        ?selected="${this.columnMappings[index.toString()] === key}"
                                       >
                                         ${colSchema.label}
                                       </option>`
@@ -309,8 +302,21 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
                 ${this.step === 3
                   ? html`
                       <h2>Validation Errors</h2>
-                      ${this.renderGrid()}
-                      <button @click="${this.handleConfirmColumnMapping}">
+                      <ul>
+                        ${this.validationErrors.map(
+                          (error) => html`
+                            <li>
+                              Row ${error.rowIndex + 1}:
+                              <ul>
+                                ${error.errors.map(
+                                  (err) => html`<li>${err.key}: ${err.message}</li>`
+                                )}
+                              </ul>
+                            </li>
+                          `
+                        )}
+                      </ul>
+                      <button @click="${this.handleRevalidate}">
                         Revalidate
                       </button>
                     `
@@ -322,16 +328,7 @@ export class SheetstormModal<T extends ImportRow> extends LitElement {
     `;
   }
 
-  private handleFileParsed(event: CustomEvent) {
-    this.data = event.detail;
-    this.columns = Object.keys(this.data[0] || {});
-    this.step = 2;
-    this.requestUpdate();
-  }
-
-  private handleFileError(event: CustomEvent) {
-    console.error('File parsing error:', event.detail);
-    alert('An error occurred while parsing the file.');
-    // Handle error UI feedback if needed
+  private handleRevalidate(): void {
+    this.handleConfirmColumnMapping();
   }
 }

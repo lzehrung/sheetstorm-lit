@@ -1,51 +1,36 @@
 import { html } from 'lit-html';
 import '../../dist/index'; // Import your Lit component
-import { ValidateSchema } from '../../dist/index';
+import { ValidateSchema } from '../../src/validations';
 
 export default {
   title: 'Sheetstorm Import Modal',
   component: 'sheetstorm-modal',
 };
 
-const schema: ValidateSchema<{
-  name: string;
-  email: string;
-}> = {
+const schema: ValidateSchema = {
   name: {
     label: 'Name',
     type: 'string',
-    valid: (value) => {
-      if (!value) {
-        return {
-          isValid: false,
-          message: 'Name is required',
-        };
-      }
-      return {
-        isValid: true
-      };
-    },
+    validators: [
+      (value: string) => ({
+        isValid: value.trim().length > 0,
+        message: 'Name is required',
+      }),
+    ],
   },
   email: {
     label: 'Email',
     type: 'string',
-    valid: (value) => {
-      if (!value) {
-        return {
-          isValid: false,
-          message: 'Email is required',
-        };
-      }
-      if (!value.includes('@')) {
-        return {
-          isValid: false,
-          message: 'Email is invalid',
-        };
-      }
-      return {
-        isValid: true,
-      };
-    },
+    validators: [
+      (value: string) => ({
+        isValid: value.trim().length > 0,
+        message: 'Email is required',
+      }),
+      (value: string) => ({
+        isValid: value.includes('@'),
+        message: 'Email must contain "@" symbol',
+      }),
+    ],
   },
 };
 

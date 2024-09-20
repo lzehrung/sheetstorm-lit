@@ -1,52 +1,61 @@
-export interface ValidationError<T extends ImportRow> {
-  key: keyof T;
+export interface ValidationError {
+  key: string;
   message: string;
 }
 
-export interface ValidateResult<T extends ImportRow> {
+export interface ValidateResult {
   rowIndex: number;
   isValid: boolean;
-  errors: ValidationError<T>[];
+  errors: ValidationError[];
 }
 
-export type ImportRow = { [key: string | number]: unknown };
+export type ImportRow = { [key: string]: string };
 
-export type ValidatorFunc = (value: string) => { isValid: false; message: string } | { isValid: true };
+export type ValidatorFunc = (value: string) => { isValid: boolean; message?: string };
 
-export type ValidateSchema<T extends ImportRow> = Record<
-  keyof T,
+export type ValidateSchema = Record<
+  string,
   {
     label: string;
     type: 'string' | 'number' | 'date' | 'boolean';
-    valid: ValidatorFunc;
+    validators: ValidatorFunc[]; // Array of validation functions
   }
 >;
 
 /**
  * Validates the transformed data against the provided schema.
  *
- * @param data - The array of data objects to validate. Each object should have keys matching the schema.
+ * @param data - The array of data arrays to validate. Each inner array represents a row.
  * @param schema - The validation schema defining rules for each field.
+ * @param columnMappings - Mapping from source columns (as string indices) to schema fields.
  * @returns An array of validation results, each corresponding to a row of data.
  */
-export function validateData<T extends ImportRow>(
-  data: T[],
-  schema: ValidateSchema<T>
-): ValidateResult<T>[] {
-  const allErrors: ValidateResult<T>[] = [];
+export function validateData(
+  data: string[][],
+  schema: ValidateSchema,
+  columnMappings: Record<string, string>
+): ValidateResult[] {
+  const allErrors: ValidateResult[] = [];
 
   data.forEach((row, rowIndex) => {
-    const rowErrors: ValidationError<T>[] = [];
+    const rowErrors: ValidationError[] = [];
 
-    Object.entries(schema).forEach(([fieldKey, schemaField]) => {
-      const value = row[fieldKey as keyof T];
+    Object.entries(columnMappings).forEach(([sourceCol, schemaKey]) => {
+      const schemaField = schema[schemaKey];
+      if (!schemaField) {
+        rowErrors.push({ key: schemaKey, message: `Schema for "${schemaKey}" not found.` });
+        return;
+      }
 
-      // Ensure the value is a string before validation
-      const stringValue = value !== undefined && value !== null ? String(value) : '';
+      const value = row[parseInt(sourceCol, 10)] || '';
 
-      const result = schemaField.valid(stringValue);
-      if (!result.isValid) {
-        rowErrors.push({ key: fieldKey as keyof T, message: result.message });
+      for (const validator of schemaField.validators) {
+        const result = validator(value);
+        if (!result.isValid) {
+          rowErrors.push({ key: schemaKey, message: result.message || 'Invalid value' });
+          // Stop further validation for this field after the first failure
+          break;
+        }
       }
     });
 
