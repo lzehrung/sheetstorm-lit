@@ -1,10 +1,10 @@
-import { html } from 'lit-html';
-import '../../dist/index'; // Import your Lit component
+import { html, TemplateResult } from 'lit';
+import '../../dist/index'; // Import your Lit components
 import { ValidateSchema } from '../../src/validations';
 
 export default {
-  title: 'Sheetstorm Import Modal',
-  component: 'sheetstorm-modal',
+  title: 'Sheetstorm Import',
+  component: 'sheetstorm-import',
 };
 
 const schema: ValidateSchema = {
@@ -34,4 +34,29 @@ const schema: ValidateSchema = {
   },
 };
 
-export const Default = () => html`<sheetstorm-modal open="true" .schema=${schema}></sheetstorm-modal>`;
+export const Default = (): TemplateResult =>
+  html`<sheetstorm-import .schema=${schema}></sheetstorm-import>`;
+
+export const WithModal = (): TemplateResult => {
+  let open = false;
+
+  const handleOpenClick = () => {
+    open = true;
+  };
+
+  const handleSuccess = (event: CustomEvent) => {
+    console.log('Data imported successfully:', event.detail);
+    open = false;
+  };
+
+  return html`
+    <button @click="${handleOpenClick}" style="margin-bottom: 16px;">
+      Open Sheetstorm Modal
+    </button>
+    <sheetstorm-modal
+      .open="${open}"
+      .schema="${schema}"
+      @data-import-success="${handleSuccess}"
+    ></sheetstorm-modal>
+  `;
+};

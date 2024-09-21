@@ -2,11 +2,11 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '@vaadin/grid';
-import { validateData, ValidateResult, ValidateSchema } from './validations';
+import { validateData, ValidateResult, ValidateSchema, ValidationError } from './validations';
 import './workflow/file-select.component';
 
-@customElement('sheetstorm-modal')
-export class SheetstormModal extends LitElement {
+@customElement('sheetstorm-import')
+export class Sheetstorm extends LitElement {
   @property({ type: Boolean })
   open = false;
 
@@ -21,34 +21,11 @@ export class SheetstormModal extends LitElement {
   @state() private transformedData: Record<string, string>[] = []; // Transformed data per schema
   @state() private hasHeaders = false;
 
+  // New state for per-cell errors
+  @state() private cellErrors: Record<number, Record<string, string>> = {};
+
   static styles = css`
-    /* Modal styles here */
-    .modal {
-      /* Your modal styles */
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: rgba(0,0,0,0.5);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    .modal-content {
-      background: white;
-      padding: 20px;
-      border-radius: 5px;
-      width: 80%;
-      max-height: 90%;
-      overflow-y: auto;
-    }
-    .close {
-      float: right;
-      cursor: pointer;
-      font-size: 1.5em;
-    }
-    /* Add more styles as needed */
+    /* General styles */
     vaadin-grid {
       width: 100%;
       height: 400px;
@@ -60,6 +37,27 @@ export class SheetstormModal extends LitElement {
     input[type='text'] {
       width: 100%;
       box-sizing: border-box;
+      border: 1px solid var(--input-border-color, #ccc);
+      border-radius: 4px;
+      padding: 4px;
+    }
+    input[type='text'].error {
+      border-color: red;
+    }
+    .popover {
+      position: absolute;
+      background: rgba(255, 0, 0, 0.9);
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: nowrap;
+      z-index: 10;
+      top: -5px;
+      right: -5px;
+    }
+    .cell-container {
+      position: relative;
     }
     table {
       width: 100%;
@@ -84,7 +82,7 @@ export class SheetstormModal extends LitElement {
 
   constructor() {
     super();
-    // Removed direct fileInput handling
+    // Initialization if needed
   }
 
   connectedCallback() {
@@ -207,7 +205,19 @@ export class SheetstormModal extends LitElement {
     // Validate the data
     const validationResults = validateData(this.filteredData, this.schema, this.columnMappings);
 
-    // Filter out invalid rows
+    // Initialize cellErrors based on validationResults
+    this.cellErrors = {}; // Reset previous errors
+    validationResults.forEach(result => {
+      if (!result.isValid) {
+        result.errors.forEach(error => {
+          if (!this.cellErrors[result.rowIndex]) {
+            this.cellErrors[result.rowIndex] = {};
+          }
+          this.cellErrors[result.rowIndex][error.key] = error.message;
+        });
+      }
+    });
+
     this.validationErrors = validationResults.filter(
       (result) => !result.isValid
     );
@@ -235,6 +245,7 @@ export class SheetstormModal extends LitElement {
       new CustomEvent('data-import-success', { detail: this.transformedData })
     );
     this.open = false;
+    this.step = 1; // Reset to initial step if needed
   }
 
   /**
@@ -247,7 +258,49 @@ export class SheetstormModal extends LitElement {
     if (this.transformedData[rowIndex]) {
       this.transformedData[rowIndex][key] = value;
       this.requestUpdate();
+      this.validateCell(rowIndex, key, value);
     }
+  }
+
+  /**
+   * Validates a single cell and updates the cellErrors state.
+   *
+   * @param rowIndex - The index of the row being validated.
+   * @param key - The schema key corresponding to the column.
+   * @param value - The new value of the cell.
+   */
+  private validateCell(rowIndex: number, key: string, value: string): void {
+    const schemaField = this.schema[key];
+    if (!schemaField) {
+      console.warn(`No schema found for key: ${key}`);
+      return;
+    }
+
+    let errorMessage = '';
+
+    for (const validator of schemaField.validators) {
+      const result = validator(value);
+      if (!result.isValid) {
+        errorMessage = result.message || 'Invalid value';
+        break; // Stop at the first validation error
+      }
+    }
+
+    if (!this.cellErrors[rowIndex]) {
+      this.cellErrors[rowIndex] = {};
+    }
+
+    if (errorMessage) {
+      this.cellErrors[rowIndex][key] = errorMessage;
+    } else {
+      delete this.cellErrors[rowIndex][key];
+      // Clean up if no more errors in the row
+      if (Object.keys(this.cellErrors[rowIndex]).length === 0) {
+        delete this.cellErrors[rowIndex];
+      }
+    }
+
+    this.requestUpdate();
   }
 
   /**
@@ -272,7 +325,7 @@ export class SheetstormModal extends LitElement {
   }
 
   /**
-   * Renders the data grid with editable cells.
+   * Renders the data grid with editable cells and error indicators.
    *
    * @returns The Vaadin grid template.
    */
@@ -289,7 +342,8 @@ export class SheetstormModal extends LitElement {
             <vaadin-grid-column
               path="${key}"
               header="${colConfig.label}"
-              .renderer="${this.gridRenderer}"
+              .renderer="${(root: HTMLElement, column: any, rowData: any) =>
+                this.gridRenderer(root, column, rowData, key)}"
               @sort="${this.handleSort}"
             ></vaadin-grid-column>
           `
@@ -299,27 +353,42 @@ export class SheetstormModal extends LitElement {
   }
 
   /**
-   * Renders each cell in the data grid as an editable input field.
+   * Renders each cell in the data grid as an editable input field with error handling.
    *
    * @param root - The cell element.
    * @param column - The column configuration.
    * @param rowData - The row data.
+   * @param key - The schema key corresponding to the column.
    */
   private gridRenderer(
     root: HTMLElement,
     column: any,
-    rowData: any
+    rowData: any,
+    key: string
   ): void {
     if (!root.firstElementChild) {
+      // Create a container for relative positioning
+      const container = document.createElement('div');
+      container.classList.add('cell-container');
+
       const input = document.createElement('input');
       input.type = 'text';
-      input.value = rowData.item[column.path] || '';
+      input.value = rowData.item[key] || '';
+      input.classList.add('editable-cell');
+
+      // Check for existing errors
+      const rowIndex = rowData.index;
+      const error = this.cellErrors[rowIndex]?.[key];
+      if (error) {
+        input.classList.add('error');
+      }
+
       input.addEventListener('input', (e: Event) => {
         const target = e.target as HTMLInputElement;
         const customEvent = new CustomEvent('cell-edit', {
           detail: {
-            rowIndex: rowData.index,
-            key: column.path,
+            rowIndex: rowIndex,
+            key: key,
             value: target.value,
           },
           bubbles: true,
@@ -327,7 +396,18 @@ export class SheetstormModal extends LitElement {
         });
         root.dispatchEvent(customEvent);
       });
-      root.appendChild(input);
+
+      container.appendChild(input);
+
+      // If there's an error, display a tooltip/popover
+      if (error) {
+        const errorTooltip = document.createElement('div');
+        errorTooltip.classList.add('popover');
+        errorTooltip.textContent = error;
+        container.appendChild(errorTooltip);
+      }
+
+      root.appendChild(container);
     }
   }
 
@@ -420,55 +500,55 @@ export class SheetstormModal extends LitElement {
   }
 
   /**
-   * Renders the modal content based on the current step.
+   * Renders the component content based on the current step.
    *
-   * @returns The modal content template.
+   * @returns The component template.
    */
   render() {
     return html`
-      ${this.open
+      ${this.step === 1
         ? html`
-            <div class="modal">
-              <div class="modal-content">
-                <span class="close" @click="${() => (this.open = false)}
-                  ">&times;</span
-                >
-                ${this.step === 1
-                  ? html`
-                      <h2>Import Data</h2>
-                      <file-select-component
-                        @file-parsed="${this.handleFileParsed}"
-                        @error="${this.handleFileError}"
-                      ></file-select-component>
-                    `
-                  : ''}
-                ${this.step === 2
-                  ? this.renderColumnMapping()
-                  : ''}
-                ${this.step === 3
-                  ? html`
-                      <h2>Validation Errors</h2>
-                      <ul>
-                        ${this.validationErrors.map(
-                          (error) => html`
-                            <li>
-                              Row ${error.rowIndex + 1}:
-                              <ul>
-                                ${error.errors.map(
-                                  (err) => html`<li>${err.key}: ${err.message}</li>`
-                                )}
-                              </ul>
-                            </li>
-                          `
-                        )}
-                      </ul>
-                      <button @click="${this.handleRevalidate}">
-                        Revalidate
-                      </button>
-                    `
-                  : ''}
-              </div>
-            </div>
+            <h2>Import Data</h2>
+            <file-select-component
+              @file-parsed="${this.handleFileParsed}"
+              @error="${this.handleFileError}"
+            ></file-select-component>
+          `
+        : ''}
+      ${this.step === 2
+        ? this.renderColumnMapping()
+        : ''}
+      ${this.step === 3
+        ? html`
+            <h2>Review and Submit</h2>
+            ${this.validationErrors.length > 0
+              ? html`
+                  <ul>
+                    ${this.validationErrors.map(
+                      (error) => html`
+                        <li>
+                          Row ${error.rowIndex + 1}:
+                          <ul>
+                            ${error.errors.map(
+                              (err) => html`<li>${err.key}: ${err.message}</li>`
+                            )}
+                          </ul>
+                        </li>
+                      `
+                    )}
+                  </ul>
+                  <button @click="${this.handleRevalidate}">
+                    Revalidate
+                  </button>
+                `
+              : ''}
+            ${this.renderGrid()}
+            <button
+              ?disabled="${Object.keys(this.cellErrors).length > 0}"
+              @click="${this.handleFinalSubmit}"
+            >
+              Submit
+            </button>
           `
         : ''}
     `;
@@ -479,5 +559,16 @@ export class SheetstormModal extends LitElement {
    */
   private handleRevalidate(): void {
     this.handleConfirmColumnMapping();
+  }
+
+  /**
+   * Handles the final submission of data after all validations pass.
+   */
+  private handleFinalSubmit(): void {
+    if (Object.keys(this.cellErrors).length === 0) {
+      this.transformData();
+    } else {
+      alert('Please fix all validation errors before submitting.');
+    }
   }
 }
