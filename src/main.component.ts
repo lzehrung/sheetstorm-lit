@@ -15,9 +15,11 @@ export class SheetstormModal extends LitElement {
   @state() private step = 1;
   @state() private columns: string[] = [];
   @state() private columnMappings: Record<string, string> = {}; // Source column index to schema key
-  @state() private data: string[][] = [];
+  @state() private rawData: string[][] = []; // All parsed data
+  @state() private filteredData: string[][] = []; // Data excluding header if hasHeaders
   @state() private validationErrors: ValidateResult[] = [];
   @state() private transformedData: Record<string, string>[] = []; // Transformed data per schema
+  @state() private hasHeaders = false;
 
   static styles = css`
     /* Modal styles here */
@@ -75,6 +77,9 @@ export class SheetstormModal extends LitElement {
       margin-top: 16px;
       padding: 8px 16px;
     }
+    .header-option {
+      margin-bottom: 10px;
+    }
   `;
 
   constructor() {
@@ -89,20 +94,79 @@ export class SheetstormModal extends LitElement {
     }
   }
 
+  /**
+   * Handles the parsed file data.
+   *
+   * @param event - The file-parsed event containing the data.
+   */
   private async handleFileParsed(event: CustomEvent<string[][]>) {
-    this.data = event.detail;
-    // Assign column indices as names
-    this.columns = this.data[0].map((_, index) => `Column ${index + 1}`);
+    this.rawData = event.detail;
+    this.hasHeaders = this.detectHasHeaders(this.rawData);
+    if (this.hasHeaders) {
+      this.filteredData = this.rawData.slice(1); // Exclude header row
+      this.columns = this.rawData[0].map((header, index) => header || `Column ${index + 1}`);
+    } else {
+      this.filteredData = this.rawData;
+      this.columns = this.rawData[0].map((_, index) => `Column ${index + 1}`);
+    }
     this.step = 2;
     this.requestUpdate();
   }
 
+  /**
+   * Detects whether the first row of data is a header row.
+   *
+   * @param data - The parsed data array.
+   * @returns True if a header row is detected, false otherwise.
+   */
+  private detectHasHeaders(data: string[][]): boolean {
+    if (data.length < 2) {
+      return false; // Not enough data to determine
+    }
+
+    const firstRow = data[0];
+    const otherRows = data.slice(1, 4); // Check next 3 rows
+
+    // Check if all cells in the first row are non-empty strings
+    const isFirstRowAllStrings = firstRow.every(cell => typeof cell === 'string' && cell.trim() !== '');
+
+    if (!isFirstRowAllStrings) {
+      return false;
+    }
+
+    // Check if other rows have mixed types
+    const isOtherRowsMixed = otherRows.some(row => {
+      const types = row.map(cell => {
+        if (!isNaN(Number(cell))) return 'number';
+        if (Date.parse(cell)) return 'date';
+        if (cell.toLowerCase() === 'true' || cell.toLowerCase() === 'false') return 'boolean';
+        return 'string';
+      });
+      // If there is a mix of types, return true
+      const uniqueTypes = new Set(types);
+      return uniqueTypes.size > 1;
+    });
+
+    return isFirstRowAllStrings && isOtherRowsMixed;
+  }
+
+  /**
+   * Handles errors during file parsing.
+   *
+   * @param event - The error event.
+   */
   private handleFileError(event: CustomEvent) {
     console.error('File parsing error:', event.detail);
     alert('An error occurred while parsing the file.');
     // Handle error UI feedback if needed
   }
 
+  /**
+   * Handles changes in column mappings.
+   *
+   * @param event - The change event from the select dropdown.
+   * @param sourceColumn - The index of the source column being mapped.
+   */
   private handleColumnMappingChange(
     event: Event,
     sourceColumn: string
@@ -120,6 +184,9 @@ export class SheetstormModal extends LitElement {
     this.requestUpdate();
   }
 
+  /**
+   * Confirms the column mappings and initiates validation.
+   */
   private handleConfirmColumnMapping(): void {
     // Ensure all required schema fields are mapped
     const requiredFields = Object.keys(this.schema);
@@ -138,9 +205,9 @@ export class SheetstormModal extends LitElement {
     }
 
     // Validate the data
-    const validationResults = validateData(this.data, this.schema, this.columnMappings);
+    const validationResults = validateData(this.filteredData, this.schema, this.columnMappings);
 
-    // Filter out valid rows
+    // Filter out invalid rows
     this.validationErrors = validationResults.filter(
       (result) => !result.isValid
     );
@@ -152,8 +219,11 @@ export class SheetstormModal extends LitElement {
     }
   }
 
+  /**
+   * Transforms the validated data into the desired format and emits a success event.
+   */
   private transformData(): void {
-    this.transformedData = this.data.map(row => {
+    this.transformedData = this.filteredData.map(row => {
       const obj: Record<string, string> = {};
       Object.entries(this.columnMappings).forEach(([sourceCol, schemaKey]) => {
         obj[schemaKey] = row[parseInt(sourceCol, 10)] || '';
@@ -167,6 +237,11 @@ export class SheetstormModal extends LitElement {
     this.open = false;
   }
 
+  /**
+   * Handles cell edits in the data grid.
+   *
+   * @param event - The cell-edit event containing row and column details.
+   */
   private handleCellEdit(event: CustomEvent) {
     const { rowIndex, key, value } = event.detail;
     if (this.transformedData[rowIndex]) {
@@ -175,6 +250,11 @@ export class SheetstormModal extends LitElement {
     }
   }
 
+  /**
+   * Handles sorting logic for the data grid columns.
+   *
+   * @param event - The sort event.
+   */
   private handleSort(event: Event): void {
     const grid = event.currentTarget as any;
     const column = event.target as any;
@@ -191,6 +271,11 @@ export class SheetstormModal extends LitElement {
     }
   }
 
+  /**
+   * Renders the data grid with editable cells.
+   *
+   * @returns The Vaadin grid template.
+   */
   private renderGrid(): unknown {
     return html`
       <vaadin-grid
@@ -213,6 +298,13 @@ export class SheetstormModal extends LitElement {
     `;
   }
 
+  /**
+   * Renders each cell in the data grid as an editable input field.
+   *
+   * @param root - The cell element.
+   * @param column - The column configuration.
+   * @param rowData - The row data.
+   */
   private gridRenderer(
     root: HTMLElement,
     column: any,
@@ -239,6 +331,99 @@ export class SheetstormModal extends LitElement {
     }
   }
 
+  /**
+   * Renders the column mapping interface with the "Has Headers" checkbox.
+   *
+   * @returns The column mapping template.
+   */
+  private renderColumnMapping(): unknown {
+    // Get list of mapped schema keys
+    const mappedKeys = new Set(Object.values(this.columnMappings));
+
+    return html`
+      <h2>Map Columns</h2>
+      <div class="header-option">
+        <label>
+          <input type="checkbox" .checked=${this.hasHeaders} @change=${this.toggleHeaders} />
+          First row contains headers
+        </label>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Source Column</th>
+            <th>Target Column</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${this.columns.map(
+            (col, index) => html`
+              <tr>
+                <td>${col}</td>
+                <td>
+                  <select
+                    @change="${(e: Event) => this.handleColumnMappingChange(e, index.toString())}"
+                    .value="${this.columnMappings[index.toString()] || ''}"
+                  >
+                    <option value="">--Select--</option>
+                    ${Object.entries(this.schema).map(
+                      ([key, colSchema]) => {
+                        // Disable option if it's already mapped to another column
+                        const isDisabled = mappedKeys.has(key) && this.columnMappings[index.toString()] !== key;
+                        return html`<option
+                          value="${key}"
+                          ?selected="${this.columnMappings[index.toString()] === key}"
+                          ?disabled="${isDisabled}"
+                        >
+                          ${colSchema.label}
+                        </option>`;
+                      }
+                    )}
+                  </select>
+                </td>
+              </tr>
+            `
+          )}
+        </tbody>
+      </table>
+      <button @click="${this.handleConfirmColumnMapping}">
+        Confirm Mapping
+      </button>
+    `;
+  }
+
+  /**
+   * Toggles the "Has Headers" state and updates columns and data accordingly.
+   *
+   * @param e - The change event from the checkbox.
+   */
+  private toggleHeaders(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const newHasHeaders = input.checked;
+    if (newHasHeaders !== this.hasHeaders) {
+      this.hasHeaders = newHasHeaders;
+      if (this.hasHeaders) {
+        // Treat first row as header
+        if (this.rawData.length > 0) {
+          this.filteredData = this.rawData.slice(1);
+          this.columns = this.rawData[0].map((header, index) => header || `Column ${index + 1}`);
+        }
+      } else {
+        // Include all data and use generic column names
+        this.filteredData = this.rawData;
+        this.columns = this.rawData[0].map((_, index) => `Column ${index + 1}`);
+      }
+      // Reset column mappings as column names might have changed
+      this.columnMappings = {};
+      this.requestUpdate();
+    }
+  }
+
+  /**
+   * Renders the modal content based on the current step.
+   *
+   * @returns The modal content template.
+   */
   render() {
     return html`
       ${this.open
@@ -258,46 +443,7 @@ export class SheetstormModal extends LitElement {
                     `
                   : ''}
                 ${this.step === 2
-                  ? html`
-                      <h2>Map Columns</h2>
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Source Column</th>
-                            <th>Target Column</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          ${this.columns.map(
-                            (col, index) => html`
-                              <tr>
-                                <td>${col}</td>
-                                <td>
-                                  <select
-                                    @change="${(e: Event) =>
-                                      this.handleColumnMappingChange(e, index.toString())}"
-                                    .value="${this.columnMappings[index.toString()] || ''}"
-                                  >
-                                    <option value="">--Select--</option>
-                                    ${Object.entries(this.schema).map(
-                                      ([key, colSchema]) => html`<option
-                                        value="${key}"
-                                        ?selected="${this.columnMappings[index.toString()] === key}"
-                                      >
-                                        ${colSchema.label}
-                                      </option>`
-                                    )}
-                                  </select>
-                                </td>
-                              </tr>
-                            `
-                          )}
-                        </tbody>
-                      </table>
-                      <button @click="${this.handleConfirmColumnMapping}">
-                        Confirm Mapping
-                      </button>
-                    `
+                  ? this.renderColumnMapping()
                   : ''}
                 ${this.step === 3
                   ? html`
@@ -328,6 +474,9 @@ export class SheetstormModal extends LitElement {
     `;
   }
 
+  /**
+   * Handles revalidation when the user opts to fix validation errors.
+   */
   private handleRevalidate(): void {
     this.handleConfirmColumnMapping();
   }

@@ -5,12 +5,6 @@ import { parseExcelFile, parseCsvFile } from '../data-parser'; // Correct import
 
 @customElement('file-select-component')
 export class FileSelectComponent extends LitElement {
-  @property({ type: Boolean })
-  hasHeaders = true; // Determines if the first row contains headers
-
-  @state()
-  private parsedData: string[][] = [];
-
   static styles = css`
     .file-input {
       margin: 20px 0;
@@ -18,19 +12,13 @@ export class FileSelectComponent extends LitElement {
     .error {
       color: red;
     }
-    .header-option {
-      margin-bottom: 10px;
-    }
   `;
+
+  @state()
+  private parsedData: string[][] = [];
 
   render() {
     return html`
-      <div class="header-option">
-        <label>
-          <input type="checkbox" .checked=${this.hasHeaders} @change=${this.toggleHeaders} />
-          First row contains headers
-        </label>
-      </div>
       <div class="file-input">
         <input type="file" @change="${this.handleFileSelect}" accept=".csv, .xlsx" />
       </div>
@@ -40,11 +28,6 @@ export class FileSelectComponent extends LitElement {
     `;
   }
 
-  private toggleHeaders(e: Event) {
-    const input = e.target as HTMLInputElement;
-    this.hasHeaders = input.checked;
-  }
-
   private async handleFileSelect(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
@@ -52,9 +35,9 @@ export class FileSelectComponent extends LitElement {
       try {
         let data: string[][];
         if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-          data = await parseExcelFile(file, this.hasHeaders);
+          data = await parseExcelFile(file);
         } else if (file.type === 'text/csv') {
-          data = await parseCsvFile(file, this.hasHeaders);
+          data = await parseCsvFile(file);
         } else {
           throw new Error('Unsupported file type');
         }
