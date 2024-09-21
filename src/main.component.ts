@@ -2,7 +2,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import '@vaadin/grid';
-import { validateData, ValidateResult, ValidateSchema, ValidationError } from './validations';
+import { validateData, ValidateResult, ValidateSchema } from './validations';
 import './workflow/file-select.component';
 
 @customElement('sheetstorm-import')
@@ -202,6 +202,9 @@ export class Sheetstorm extends LitElement {
       return;
     }
 
+    // Transform the data regardless of validation
+    this.transformData();
+
     // Validate the data
     const validationResults = validateData(this.filteredData, this.schema, this.columnMappings);
 
@@ -222,11 +225,9 @@ export class Sheetstorm extends LitElement {
       (result) => !result.isValid
     );
 
-    if (this.validationErrors.length > 0) {
-      this.step = 3;
-    } else {
-      this.transformData();
-    }
+    // Update the grid to display data with validation errors
+    this.step = 3;
+    this.requestUpdate();
   }
 
   /**
@@ -241,11 +242,14 @@ export class Sheetstorm extends LitElement {
       return obj;
     });
 
-    this.dispatchEvent(
-      new CustomEvent('data-import-success', { detail: this.transformedData })
-    );
-    this.open = false;
-    this.step = 1; // Reset to initial step if needed
+    // Only dispatch success event if there are no validation errors
+    if (this.validationErrors.length === 0) {
+      this.dispatchEvent(
+        new CustomEvent('data-import-success', { detail: this.transformedData })
+      );
+      this.open = false;
+      this.step = 1; // Reset to initial step if needed
+    }
   }
 
   /**
