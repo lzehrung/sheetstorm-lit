@@ -1,4 +1,5 @@
 import type { Preview } from "@storybook/web-components";
+import '../src/index.ts';
 
 const preview: Preview = {
   parameters: {
@@ -9,6 +10,8 @@ const preview: Preview = {
       },
     },
   },
+
+  tags: ["autodocs"]
 };
 
 export default preview;

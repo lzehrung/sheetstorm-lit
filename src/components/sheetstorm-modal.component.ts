@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import './importer/index';
@@ -8,7 +9,8 @@ export class SheetstormModal extends LitElement {
   @property({ type: Boolean })
   open = false;
 
-  @property({ type: Object, attribute: 'schema' }) schema!: ValidateSchema;
+  @property({ type: Object, attribute: 'schema' })
+  schema!: ValidateSchema;
 
   static styles = css`
     /* Modal styles */
@@ -65,10 +67,10 @@ export class SheetstormModal extends LitElement {
   }
 
   /**
-   * Closes the modal.
+   * Closes the modal by emitting a 'close' event.
    */
   private closeModal() {
-    this.open = false;
+    this.dispatchEvent(new CustomEvent('close', { bubbles: true, composed: true }));
   }
 
   /**
@@ -81,13 +83,12 @@ export class SheetstormModal extends LitElement {
   }
 
   /**
-   * Handles clicking on the backdrop to close the modal.
+   * Handles clicking on the backdrop by emitting a 'backdrop-click' event.
    *
    * @param e - The click event.
    */
   private handleBackdropClick(e: Event) {
-    console.log('handleBackdropClick', e);
-    this.closeModal();
+    this.dispatchEvent(new CustomEvent('backdrop-click', { bubbles: true, composed: true }));
   }
 
   /**
@@ -96,7 +97,7 @@ export class SheetstormModal extends LitElement {
    * @param e - The custom event containing the transformed data.
    */
   private handleSuccess(e: CustomEvent) {
-    this.dispatchEvent(new CustomEvent('data-import-success', { detail: e.detail }));
-    this.closeModal();
+    this.dispatchEvent(new CustomEvent('data-import-success', { detail: e.detail, bubbles: true, composed: true }));
+    this.dispatchEvent(new CustomEvent('close', { bubbles: true, composed: true }));
   }
 }

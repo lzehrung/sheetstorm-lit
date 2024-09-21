@@ -2,7 +2,7 @@
 import { html, TemplateResult } from 'lit';
 import { LitElement } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import '../../dist/index'; // Import your Lit components
+import { SheetstormImport, SheetstormModal } from '../../src/index';
 import { ValidateSchema } from '../../src/validations';
 
 export default {
@@ -46,6 +46,14 @@ class WithModalWrapper extends LitElement {
     this.open = true;
   }
 
+  private handleClose() {
+    this.open = false;
+  }
+
+  private handleBackdropClick() {
+    this.open = false;
+  }
+
   private handleSuccess(event: CustomEvent) {
     console.log('Data imported successfully:', event.detail);
     this.open = false;
@@ -59,6 +67,8 @@ class WithModalWrapper extends LitElement {
       <sheetstorm-modal
         .open="${this.open}"
         .schema="${schema}"
+        @close="${this.handleClose}"
+        @backdrop-click="${this.handleBackdropClick}"
         @data-import-success="${this.handleSuccess}"
       ></sheetstorm-modal>
     `;
