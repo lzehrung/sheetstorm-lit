@@ -33,6 +33,7 @@ export class SheetstormImport extends LitElement {
     button {
       margin-top: 16px;
       padding: 8px 16px;
+      margin-right: 8px;
     }
   `;
 
@@ -126,6 +127,16 @@ export class SheetstormImport extends LitElement {
   }
 
   /**
+   * Handles going back to the previous step.
+   */
+  private handleBack() {
+    if (this.step > 1) {
+      this.step -= 1;
+      this.requestUpdate();
+    }
+  }
+
+  /**
    * Resets the component to initial state.
    */
   private reset() {
@@ -151,6 +162,7 @@ export class SheetstormImport extends LitElement {
         : ''}
       ${this.step === 2
         ? html`
+            <button @click="${this.handleBack}">Back</button>
             <column-mapping-component
               .rawData="${this.rawData}"
               .hasHeaders="${this.hasHeaders}"
@@ -161,6 +173,7 @@ export class SheetstormImport extends LitElement {
         : ''}
       ${this.step === 3
         ? html`
+            <button @click="${this.handleBack}">Back</button>
             <validation-errors-component .validationResults="${this.validationResults}"></validation-errors-component>
             <data-grid-component
               .data="${this.transformedData}"
