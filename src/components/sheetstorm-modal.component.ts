@@ -1,7 +1,7 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
-import './main.component'; // Ensure this path is correct based on your project structure
-import { ValidateSchema } from './validations';
+import './importer/index';
+import { ValidateSchema } from '../validations';
 
 @customElement('sheetstorm-modal')
 export class SheetstormModal extends LitElement {
