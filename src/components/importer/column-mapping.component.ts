@@ -10,6 +10,7 @@ export class ColumnMappingComponent extends LitElement {
 
   @state() private columns: string[] = [];
   @state() private columnMappings: Record<string, string> = {};
+  @state() private showSamples: boolean = true;
 
   static styles = css`
     /* Existing styles */
@@ -21,6 +22,7 @@ export class ColumnMappingComponent extends LitElement {
     th, td {
       border: 1px solid #ddd;
       padding: 8px;
+      vertical-align: top;
     }
     select {
       width: 100%;
@@ -30,6 +32,20 @@ export class ColumnMappingComponent extends LitElement {
     }
     button {
       padding: 8px 16px;
+    }
+    .samples {
+      margin-top: 8px;
+      font-size: 0.9em;
+      color: #555;
+    }
+    .sample-item {
+      background-color: #f9f9f9;
+      padding: 4px;
+      margin-bottom: 2px;
+      border-radius: 4px;
+    }
+    .toggle-samples {
+      margin-bottom: 16px;
     }
   `;
 
@@ -93,6 +109,30 @@ export class ColumnMappingComponent extends LitElement {
     this.requestUpdate();
   }
 
+  /**
+   * Toggles the visibility of samples.
+   */
+  private toggleSamples(e: Event) {
+    const input = e.target as HTMLInputElement;
+    this.showSamples = input.checked;
+    this.requestUpdate();
+  }
+
+  /**
+   * Retrieves the first three samples for a given column index.
+   */
+  private getSamples(sourceColIndex: number): string[] {
+    const startIndex = this.hasHeaders ? 1 : 0;
+    const samples: string[] = [];
+    for (let i = startIndex; i < this.rawData.length && samples.length < 3; i++) {
+      const cell = this.rawData[i][sourceColIndex];
+      if (cell !== undefined && cell.trim() !== '') {
+        samples.push(cell);
+      }
+    }
+    return samples;
+  }
+
   render() {
     const schemaKeys = Object.keys(this.schema);
     const mappedKeys = new Set(Object.values(this.columnMappings));
@@ -105,6 +145,12 @@ export class ColumnMappingComponent extends LitElement {
           First row contains headers
         </label>
       </div>
+      <div class="toggle-samples">
+        <label>
+          <input type="checkbox" .checked=${this.showSamples} @change="${this.toggleSamples}" />
+          Show Samples
+        </label>
+      </div>
       <table>
         <thead>
           <tr>
@@ -115,7 +161,14 @@ export class ColumnMappingComponent extends LitElement {
         <tbody>
           ${this.columns.map((col, index) => html`
             <tr>
-              <td>${col}</td>
+              <td>
+                ${col}
+                ${this.showSamples ? html`
+                  <div class="samples">
+                    ${this.getSamples(index).map(sample => html`<div class="sample-item">${sample}</div>`)}
+                  </div>
+                ` : ''}
+              </td>
               <td>
                 <select @change="${(e: Event) => this.handleMappingChange(e, index.toString())}" .value="${this.columnMappings[index.toString()] || ''}">
                   <option value="">--Select--</option>
