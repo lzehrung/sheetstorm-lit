@@ -2,7 +2,8 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { ValidateSchema } from '../../validations';
-import '@vaadin/grid';
+import '@vaadin/grid/vaadin-grid.js';
+import '@vaadin/grid/vaadin-grid-column.js';
 
 @customElement('data-grid-component')
 export class DataGridComponent extends LitElement {
