@@ -258,7 +258,17 @@ export class DataGridComponent extends LitElement {
    * Handles excluding a row when the trash can button is clicked.
    */
   private handleExclude(rowIndex: number) {
-    this.dispatchEvent(new CustomEvent('row-exclude', {
+    // Remove the row from the data array
+    this.data = [
+      ...this.data.slice(0, rowIndex),
+      ...this.data.slice(rowIndex + 1)
+    ];
+
+    // Trigger an update to re-render the grid
+    this.requestUpdate();
+
+    // Optionally, emit an event if parent components need to be aware of the change
+    this.dispatchEvent(new CustomEvent('row-excluded', {
       detail: { rowIndex },
       bubbles: true,
       composed: true,
