@@ -1,5 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { LitElement, html, css } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { parseCsvFile, parseExcelFile } from '../../data-parser';
 
 @customElement('file-select-component')
 export class FileSelectComponent extends LitElement {
@@ -16,38 +18,31 @@ export class FileSelectComponent extends LitElement {
     }
   `;
 
-  /**
-   * Handles file input change event.
-   */
   private async handleFileChange(event: Event) {
     const input = event.target as HTMLInputElement;
-    if (!input.files?.length) return;
+    if (input.files && input.files.length > 0) {
+      const file = input.files[0];
+      try {
+        let data: string[][];
+        if (file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+          data = await parseExcelFile(file);
+        } else if (file.type === 'text/csv') {
+          data = await parseCsvFile(file);
+        } else {
+          throw new Error('Unsupported file type');
+        }
 
-    const file = input.files[0];
-    this.loading = true;
-
-    try {
-      const data = await this.parseCSV(file);
-      this.dispatchEvent(new CustomEvent('file-parsed', { detail: data }));
-    } catch (error) {
-      this.dispatchEvent(new CustomEvent('error', { detail: error }));
-    } finally {
-      this.loading = false;
+        const parsedData = data.map(row => row.map(cell => cell.trim()));
+        this.dispatchEvent(new CustomEvent('file-parsed', { detail: parsedData }));
+      } catch (error: any) {
+        this.dispatchEvent(new CustomEvent('error', { detail: error.message }));
+      }
     }
-  }
-
-  /**
-   * Parses a CSV file into a 2D string array.
-   */
-  private async parseCSV(file: File): Promise<string[][]> {
-    const text = await file.text();
-    const rows = text.split('\n').map(row => row.split(',').map(cell => cell.trim()));
-    return rows;
   }
 
   render() {
     return html`
-      <input type="file" accept=".csv" @change="${this.handleFileChange}" />
+      <input type="file" accept=".csv,.xlsx,.xls" @change="${this.handleFileChange}" />
       ${this.loading ? html`<p>Loading...</p>` : ''}
     `;
   }
