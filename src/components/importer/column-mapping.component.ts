@@ -12,7 +12,7 @@ export class ColumnMappingComponent extends LitElement {
   @state() private columnMappings: Record<string, string> = {};
 
   static styles = css`
-    /* Styles for column mapping */
+    /* Existing styles */
     table {
       width: 100%;
       border-collapse: collapse;
@@ -43,8 +43,10 @@ export class ColumnMappingComponent extends LitElement {
    */
   private initializeColumns() {
     if (this.hasHeaders && this.rawData.length > 0) {
-      this.columns = this.rawData[0].map((header, index) => header || `Column ${index + 1}`);
+      // Use the first row as column headers
+      this.columns = this.rawData[0];
     } else if (this.rawData.length > 0) {
+      // Generate default column names
       this.columns = this.rawData[0].map((_, index) => `Column ${index + 1}`);
     }
   }
@@ -78,6 +80,17 @@ export class ColumnMappingComponent extends LitElement {
     }
 
     this.dispatchEvent(new CustomEvent('mapping-confirmed', { detail: { mappings: this.columnMappings, schemaKeys: requiredFields } }));
+  }
+
+  /**
+   * Toggles the "Has Headers" state and reinitializes columns.
+   */
+  private toggleHeaders(e: Event) {
+    const input = e.target as HTMLInputElement;
+    this.hasHeaders = input.checked;
+    this.initializeColumns();
+    this.columnMappings = {}; // Reset mappings as columns have changed
+    this.requestUpdate();
   }
 
   render() {
@@ -120,16 +133,5 @@ export class ColumnMappingComponent extends LitElement {
       </table>
       <button @click="${this.confirmMapping}">Confirm Mapping</button>
     `;
-  }
-
-  /**
-   * Toggles the "Has Headers" state and reinitializes columns.
-   */
-  private toggleHeaders(e: Event) {
-    const input = e.target as HTMLInputElement;
-    this.hasHeaders = input.checked;
-    this.initializeColumns();
-    this.columnMappings = {}; // Reset mappings as columns have changed
-    this.requestUpdate();
   }
 }

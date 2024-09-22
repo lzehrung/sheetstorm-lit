@@ -4,7 +4,6 @@ import { customElement, property, state } from 'lit/decorators.js';
 import './file-select.component';
 import './column-mapping.component';
 import './data-grid.component';
-import './validation-errors.component';
 import { ValidateSchema, ValidateResult } from '../../validations';
 import { validateData } from '../../validations';
 
@@ -19,9 +18,11 @@ export class SheetstormImport extends LitElement {
   @state() private columnMappings: Record<string, string> = {};
   @state() private validationResults: ValidateResult[] = [];
   @state() private transformedData: Record<string, string>[] = [];
+  @state() private cellErrors: Record<number, Record<string, string>> = {};
+  @state() private excludedRows: Set<number> = new Set();
 
   static styles = css`
-    /* Styles for the container component */
+    /* Existing styles */
     :host {
       display: block;
       padding: 16px;
@@ -97,7 +98,8 @@ export class SheetstormImport extends LitElement {
    * Transforms raw data based on column mappings.
    */
   private transformData(): void {
-    this.transformedData = this.rawData.map(row => {
+    const startIndex = this.hasHeaders ? 1 : 0;
+    this.transformedData = this.rawData.slice(startIndex).map(row => {
       const obj: Record<string, string> = {};
       Object.entries(this.columnMappings).forEach(([sourceCol, schemaKey]) => {
         obj[schemaKey] = row[parseInt(sourceCol, 10)] || '';
@@ -110,8 +112,28 @@ export class SheetstormImport extends LitElement {
    * Validates the transformed data.
    */
   private validateData(): void {
-    // Import validateData and other necessary functions
-    this.validationResults = validateData(this.rawData, this.schema, this.columnMappings);
+    // Select data rows to validate, considering excludedRows
+    const dataToValidate = this.hasHeaders ? this.rawData.slice(1) : this.rawData;
+    const dataIndices = this.hasHeaders ? dataToValidate.map((_, index) => index + 1) : dataToValidate.map((_, index) => index);
+
+    // Filter out excluded rows
+    const filteredData = dataToValidate.filter((_, idx) => !this.excludedRows.has(dataIndices[idx]));
+
+    // Validate the filtered data
+    this.validationResults = validateData(filteredData, this.schema, this.columnMappings);
+
+    // Initialize cellErrors based on validationResults
+    this.cellErrors = {};
+    this.validationResults.forEach(result => {
+      if (!result.isValid) {
+        result.errors.forEach(error => {
+          if (!this.cellErrors[result.rowIndex]) {
+            this.cellErrors[result.rowIndex] = {};
+          }
+          this.cellErrors[result.rowIndex][error.key] = error.message;
+        });
+      }
+    });
   }
 
   /**
@@ -119,7 +141,8 @@ export class SheetstormImport extends LitElement {
    */
   private handleSubmit() {
     if (this.validationResults.every(result => result.isValid)) {
-      this.dispatchEvent(new CustomEvent('data-import-success', { detail: this.transformedData }));
+      const finalData = this.transformedData.filter((_, index) => !this.excludedRows.has(index));
+      this.dispatchEvent(new CustomEvent('data-import-success', { detail: finalData }));
       this.reset();
     } else {
       alert('Please fix all validation errors before submitting.');
@@ -146,6 +169,71 @@ export class SheetstormImport extends LitElement {
     this.columnMappings = {};
     this.validationResults = [];
     this.transformedData = [];
+    this.cellErrors = {};
+    this.excludedRows = new Set();
+    this.requestUpdate();
+  }
+
+  /**
+   * Handles cell edits from DataGridComponent.
+   */
+  private async handleCellEdit(event: CustomEvent<{ rowIndex: number; key: string; value: string }>) {
+    const { rowIndex, key, value } = event.detail;
+    // Update the transformed data
+    this.transformedData[rowIndex][key] = value;
+
+    // Revalidate the specific cell
+    const schemaField = this.schema[key];
+    if (schemaField) {
+      const validators = schemaField.validators;
+      const errors: string[] = [];
+
+      for (const validator of validators) {
+        const result = await Promise.resolve(validator(value));
+        if (!result.isValid) {
+          errors.push(result.message || 'Invalid value');
+          break; // Stop after first failure
+        }
+      }
+
+      // Update cellErrors
+      if (errors.length > 0) {
+        if (!this.cellErrors[rowIndex]) {
+          this.cellErrors[rowIndex] = {};
+        }
+        this.cellErrors[rowIndex][key] = errors.join('; ');
+      } else {
+        if (this.cellErrors[rowIndex]) {
+          delete this.cellErrors[rowIndex][key];
+          if (Object.keys(this.cellErrors[rowIndex]).length === 0) {
+            delete this.cellErrors[rowIndex];
+          }
+        }
+      }
+
+      // Update validationResults
+      const correspondingResult = this.validationResults.find(r => r.rowIndex === rowIndex);
+      if (correspondingResult) {
+        correspondingResult.isValid = Object.keys(this.cellErrors[rowIndex] || {}).length === 0;
+        correspondingResult.errors = correspondingResult.errors.filter(err => err.key !== key);
+        if (errors.length > 0) {
+          correspondingResult.errors.push(
+            ...errors.map(message => ({ key, message }))
+          );
+        }
+      }
+
+      this.requestUpdate();
+    }
+  }
+
+  /**
+   * Handles excluding a row from DataGridComponent.
+   */
+  private handleRowExclude(event: CustomEvent<{ rowIndex: number }>) {
+    const { rowIndex } = event.detail;
+    this.excludedRows.add(rowIndex);
+    this.validateData();
     this.requestUpdate();
   }
 
@@ -174,10 +262,12 @@ export class SheetstormImport extends LitElement {
       ${this.step === 3
         ? html`
             <button @click="${this.handleBack}">Back</button>
-            <validation-errors-component .validationResults="${this.validationResults}"></validation-errors-component>
             <data-grid-component
               .data="${this.transformedData}"
               .schema="${this.schema}"
+              .cellErrors="${this.cellErrors}"
+              @cell-edit="${this.handleCellEdit}"
+              @row-exclude="${this.handleRowExclude}"
             ></data-grid-component>
             <button @click="${this.handleSubmit}" ?disabled="${this.validationResults.some(r => !r.isValid)}">
               Submit

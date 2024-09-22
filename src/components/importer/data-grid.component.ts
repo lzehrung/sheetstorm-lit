@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { LitElement, html, css } from 'lit';
-import { customElement, property, state } from 'lit/decorators.js';
+import { customElement, property } from 'lit/decorators.js';
 import { ValidateSchema } from '../../validations';
 import '@vaadin/grid';
 
@@ -8,8 +8,7 @@ import '@vaadin/grid';
 export class DataGridComponent extends LitElement {
   @property({ type: Array }) data: Record<string, string>[] = [];
   @property({ type: Object }) schema!: ValidateSchema;
-
-  @state() private cellErrors: Record<number, Record<string, string>> = {};
+  @property({ type: Object }) cellErrors: Record<number, Record<string, string>> = {};
 
   static styles = css`
     vaadin-grid {
@@ -22,9 +21,11 @@ export class DataGridComponent extends LitElement {
       border: 1px solid var(--input-border-color, #ccc);
       border-radius: 4px;
       padding: 4px;
+      transition: border-color 0.3s, box-shadow 0.3s;
     }
     input[type='text'].error {
       border-color: red;
+      box-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
     }
     .popover {
       position: absolute;
@@ -35,11 +36,20 @@ export class DataGridComponent extends LitElement {
       font-size: 12px;
       white-space: nowrap;
       z-index: 10;
-      top: -5px;
-      right: -5px;
+      top: 100%;
+      left: 0;
+      display: none;
+      margin-top: 2px;
     }
     .cell-container {
       position: relative;
+    }
+    .exclude-button {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      color: red;
+      font-size: 1.2em;
     }
   `;
 
@@ -56,6 +66,15 @@ export class DataGridComponent extends LitElement {
             .renderer="${(root: HTMLElement, column: any, rowData: any) => this.gridRenderer(root, column, rowData, key)}"
           ></vaadin-grid-column>
         `)}
+        <!-- Exclude Column -->
+        <vaadin-grid-column header="Exclude" flex-grow="0" width="50px">
+          <template class="header">Exclude</template>
+          <template>
+          <button class="exclude-button" @click="${() => this.handleExclude(rowData.index)}" title="Exclude Row">
+              🗑️
+            </button>
+          </template>
+        </vaadin-grid-column>
       </vaadin-grid>
     `;
   }
@@ -72,10 +91,7 @@ export class DataGridComponent extends LitElement {
       input.type = 'text';
       input.value = rowData.item[key] || '';
       input.classList.add('editable-cell');
-
-      const rowIndex = rowData.index;
-      const error = this.cellErrors[rowIndex]?.[key];
-      if (error) {
+      if (this.cellErrors[rowData.index]?.[key]) {
         input.classList.add('error');
       }
 
@@ -83,7 +99,7 @@ export class DataGridComponent extends LitElement {
         const target = e.target as HTMLInputElement;
         this.dispatchEvent(new CustomEvent('cell-edit', {
           detail: {
-            rowIndex: rowIndex,
+            rowIndex: rowData.index,
             key: key,
             value: target.value,
           },
@@ -92,17 +108,39 @@ export class DataGridComponent extends LitElement {
         }));
       });
 
+      // Create popover for errors
+      const errorTooltip = document.createElement('div');
+      errorTooltip.classList.add('popover');
       container.appendChild(input);
+      container.appendChild(errorTooltip);
 
-      if (error) {
-        const errorTooltip = document.createElement('div');
-        errorTooltip.classList.add('popover');
-        errorTooltip.textContent = error;
-        container.appendChild(errorTooltip);
-      }
+      // Show popover on focus
+      input.addEventListener('focus', () => {
+        const errors = this.cellErrors[rowData.index]?.[key];
+        if (errors) {
+          errorTooltip.innerHTML = errors.split('; ').map(err => `<div>${err}</div>`).join('');
+          errorTooltip.style.display = 'block';
+        }
+      });
+
+      // Hide popover on blur
+      input.addEventListener('blur', () => {
+        errorTooltip.style.display = 'none';
+      });
 
       root.appendChild(container);
     }
+  }
+
+  /**
+   * Handles excluding a row when the trash can button is clicked.
+   */
+  private handleExclude(rowIndex: number) {
+    this.dispatchEvent(new CustomEvent('row-exclude', {
+      detail: { rowIndex },
+      bubbles: true,
+      composed: true,
+    }));
   }
 
   /**
