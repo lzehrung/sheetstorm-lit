@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { LitElement, html, css } from 'lit';
-import { customElement, property } from 'lit/decorators.js';
+import { LitElement, html, css, PropertyValues } from 'lit';
+import { customElement, property, state } from 'lit/decorators.js';
 import { ValidateSchema } from '../../validations';
-import '@vaadin/grid/vaadin-grid.js';
-import '@vaadin/grid/vaadin-grid-column.js';
 
 @customElement('data-grid-component')
 export class DataGridComponent extends LitElement {
@@ -11,10 +9,32 @@ export class DataGridComponent extends LitElement {
   @property({ type: Object }) schema!: ValidateSchema;
   @property({ type: Object }) cellErrors: Record<number, Record<string, string>> = {};
 
+  @state() private sortColumn: string | null = null;
+  @state() private sortDirection: 'asc' | 'desc' = 'asc';
+  @state() private filters: Record<string, string> = {};
+  @state() private filteredData: Record<string, string>[] = [];
+  @state() private errorsPopoverDetails: { rowIndex: number; key: string; x: number; y: number; message: string } | null = null;
+
   static styles = css`
-    vaadin-grid {
+    table {
       width: 100%;
-      height: 400px;
+      border-collapse: collapse;
+    }
+    th, td {
+      border: 1px solid #ddd;
+      padding: 8px;
+      position: relative;
+    }
+    th {
+      background-color: #f2f2f2;
+      cursor: pointer;
+      user-select: none;
+    }
+    th .filter-input {
+      width: 90%;
+      margin-top: 4px;
+      padding: 4px;
+      box-sizing: border-box;
     }
     input[type='text'] {
       width: 100%;
@@ -23,8 +43,6 @@ export class DataGridComponent extends LitElement {
       border-radius: 4px;
       padding: 4px;
       transition: border-color 0.3s, box-shadow 0.3s;
-      position: relative;
-      z-index: 1;
     }
     input[type='text'].error {
       border-color: red;
@@ -39,248 +57,184 @@ export class DataGridComponent extends LitElement {
       font-size: 12px;
       white-space: nowrap;
       z-index: 10000;
-      display: none;
       pointer-events: none;
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
     }
-    .cell-container {
-      position: relative;
+    th.sort-asc::after {
+      content: ' ▲';
+      font-size: 12px;
     }
-    .exclude-button {
-      background: transparent;
-      border: none;
-      cursor: pointer;
-      color: red;
-      font-size: 1.2em;
-      z-index: 1;
+    th.sort-desc::after {
+      content: ' ▼';
+      font-size: 12px;
     }
   `;
 
-  private currentPopover: HTMLElement | null = null;
-  private currentInput: HTMLInputElement | null = null;
-  private resizeTimeout: number | null = null;
-
   connectedCallback() {
     super.connectedCallback();
-    window.addEventListener('resize', this.handleWindowResize);
+    this.applyFiltersAndSorting();
   }
 
-  disconnectedCallback() {
-    window.removeEventListener('resize', this.handleWindowResize);
-    super.disconnectedCallback();
-  }
-
-  /**
-   * Renders the Vaadin Grid with editable cells.
-   */
-  render() {
-    return html`
-      <vaadin-grid .items="${this.data}" theme="no-border">
-        ${Object.keys(this.schema).map(key => html`
-          <vaadin-grid-column
-            path="${key}"
-            header="${this.schema[key].label}"
-            .renderer="${(root: HTMLElement, column: any, rowData: any) => this.gridRenderer(root, column, rowData, key)}"
-          ></vaadin-grid-column>
-        `)}
-        <!-- Exclude Column with Renderer -->
-        <vaadin-grid-column header="Exclude" flex-grow="0" width="50px"
-          .renderer="${this.excludeRenderer}">
-        </vaadin-grid-column>
-      </vaadin-grid>
-    `;
+  updated(changedProperties: PropertyValues) {
+    if (
+      changedProperties.has('data') ||
+      changedProperties.has('filters') ||
+      changedProperties.has('sortColumn') ||
+      changedProperties.has('sortDirection')
+    ) {
+      this.applyFiltersAndSorting();
+    }
   }
 
   /**
-   * Renders each cell with an editable input and error handling.
+   * Applies filtering and sorting to the data.
    */
-  private gridRenderer(root: HTMLElement, column: any, rowData: any, key: string): void {
-    if (!root.firstElementChild) {
-      const container = document.createElement('div');
-      container.classList.add('cell-container');
+  private applyFiltersAndSorting() {
+    let tempData = [...this.data];
 
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = rowData.item[key] || '';
-      input.classList.add('editable-cell');
-      if (this.cellErrors[rowData.index]?.[key]) {
-        input.classList.add('error');
+    // Apply filters
+    Object.keys(this.filters).forEach(key => {
+      const filterValue = this.filters[key].toLowerCase();
+      if (filterValue) {
+        tempData = tempData.filter(row => row[key]?.toLowerCase().includes(filterValue));
       }
+    });
 
-      input.addEventListener('input', (e: Event) => {
-        const target = e.target as HTMLInputElement;
-        this.dispatchEvent(new CustomEvent('cell-edit', {
-          detail: {
-            rowIndex: rowData.index,
-            key: key,
-            value: target.value,
-          },
-          bubbles: true,
-          composed: true,
-        }));
+    // Apply sorting
+    if (this.sortColumn) {
+      tempData.sort((a, b) => {
+        const valA = a[this.sortColumn!] || '';
+        const valB = b[this.sortColumn!] || '';
+        if (valA < valB) return this.sortDirection === 'asc' ? -1 : 1;
+        if (valA > valB) return this.sortDirection === 'asc' ? 1 : -1;
+        return 0;
       });
-
-      // Show popover on focus with dynamic positioning
-      input.addEventListener('focus', (e: Event) => {
-        const errors = this.cellErrors[rowData.index]?.[key];
-        if (errors) {
-          this.showErrorsPopover((e.target as HTMLInputElement), errors);
-        }
-      });
-
-      // Hide popover on blur
-      input.addEventListener('blur', () => {
-        this.hidePopover();
-      });
-
-      container.appendChild(input);
-
-      root.appendChild(container);
     }
+
+    this.filteredData = tempData;
   }
 
   /**
-   * Creates and displays the popover.
+   * Handles sorting when a header is clicked.
    */
-  private showErrorsPopover(input: HTMLInputElement, errors: string) {
-    this.hidePopover(); // Ensure only one popover is visible
-    this.currentInput = input;
-
-    // Create popover element
-    const popover = document.createElement('div');
-    popover.setAttribute('role', 'alert');
-    popover.setAttribute('aria-live', 'assertive');
-    popover.innerHTML = errors.split('; ').map(err => `<div>${err}</div>`).join('');
-
-    // Apply inline styles
-    popover.style.position = 'fixed';
-    popover.style.background = 'rgba(255, 0, 0, 0.9)';
-    popover.style.color = 'white';
-    popover.style.padding = '8px 12px';
-    popover.style.borderRadius = '4px';
-    popover.style.fontSize = '12px';
-    popover.style.whiteSpace = 'nowrap';
-    popover.style.zIndex = '10000';
-    popover.style.display = 'block';
-    popover.style.pointerEvents = 'none';
-    popover.style.boxShadow = '0 2px 10px rgba(0,0,0,0.2)';
-
-    document.body.appendChild(popover);
-
-    // Position the popover
-    this.positionPopover(input, popover);
-
-    this.currentPopover = popover;
-  }
-
-  /**
-   * Hides and removes the current popover.
-   */
-  public hidePopover() {
-    if (this.currentPopover) {
-      this.currentPopover.remove();
-      this.currentPopover = null;
-      this.currentInput = null;
-    }
-  }
-
-  /**
-   * Positions the popover dynamically based on available space.
-   */
-  private positionPopover(input: HTMLInputElement, popover: HTMLElement) {
-    const inputRect = input.getBoundingClientRect();
-    const popoverRect = popover.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
-
-    // Determine vertical position
-    let top: number;
-    if (inputRect.bottom + popoverRect.height + 8 < viewportHeight) {
-      // Pop down
-      top = inputRect.bottom + 4; // 4px gap
-    } else if (inputRect.top - popoverRect.height - 8 > 0) {
-      // Pop up
-      top = inputRect.top - popoverRect.height - 4; // 4px gap
+  private handleSort(column: string) {
+    if (this.sortColumn === column) {
+      // Toggle sort direction
+      this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
     } else {
-      // Default to pop down
-      top = inputRect.bottom + 4;
+      this.sortColumn = column;
+      this.sortDirection = 'asc';
     }
-
-    // Determine horizontal position
-    let left: number;
-    if (inputRect.left + popoverRect.width > viewportWidth) {
-      // Align to right
-      left = viewportWidth - popoverRect.width - 8; // 8px from edge
-    } else {
-      // Align to left
-      left = inputRect.left;
-    }
-
-    popover.style.top = `${top}px`;
-    popover.style.left = `${left}px`;
   }
 
   /**
-   * Handles window resize events to reposition the popover.
+   * Handles filter input changes.
    */
-  private handleWindowResize = () => {
-    if (this.resizeTimeout) {
-      clearTimeout(this.resizeTimeout);
-    }
-    this.resizeTimeout = window.setTimeout(() => {
-      if (this.currentPopover && this.currentInput) {
-        this.positionPopover(this.currentInput, this.currentPopover);
-      }
-      this.resizeTimeout = null;
-    }, 100); // Adjust the debounce delay as needed
+  private handleFilterChange(e: Event, column: string) {
+    const input = e.target as HTMLInputElement;
+    this.filters = { ...this.filters, [column]: input.value };
   }
 
   /**
-   * Renderer for the Exclude button column.
+   * Handles cell value changes (inline editing).
    */
-  private excludeRenderer = (root: HTMLElement, column: any, rowData: any) => {
-    // Clear previous content
-    root.innerHTML = '';
+  private handleInputChange(e: Event, rowIndex: number, key: string) {
+    const input = e.target as HTMLInputElement;
+    const newValue = input.value;
 
-    // Create button
-    const button = document.createElement('button');
-    button.className = 'exclude-button';
-    button.title = 'Exclude Row';
-    button.textContent = '🗑️';
-
-    // Add click event listener
-    button.addEventListener('click', () => this.handleExclude(rowData.index));
-
-    // Append button to root
-    root.appendChild(button);
-  }
-
-  /**
-   * Handles excluding a row when the trash can button is clicked.
-   */
-  private handleExclude(rowIndex: number) {
-    // Remove the row from the data array
-    this.data = [
-      ...this.data.slice(0, rowIndex),
-      ...this.data.slice(rowIndex + 1)
-    ];
-
-    // Trigger an update to re-render the grid
-    this.requestUpdate();
-
-    // Optionally, emit an event if parent components need to be aware of the change
-    this.dispatchEvent(new CustomEvent('row-excluded', {
-      detail: { rowIndex },
+    // Emit cell-edit event to inform parent of the change
+    this.dispatchEvent(new CustomEvent('cell-edit', {
+      detail: {
+        rowIndex,
+        key,
+        value: newValue,
+      },
       bubbles: true,
       composed: true,
     }));
   }
 
   /**
-   * Updates cell errors based on validation.
+   * Shows the popover with error messages.
    */
-  public updateCellErrors(errors: Record<number, Record<string, string>>) {
-    this.cellErrors = errors;
-    this.requestUpdate();
+  private showErrorsPopover(e: MouseEvent, rowIndex: number, key: string) {
+    const errorMessage = this.cellErrors[rowIndex]?.[key];
+    if (errorMessage) {
+      const x = e.clientX;
+      const y = e.clientY;
+      this.errorsPopoverDetails = { rowIndex, key, x, y, message: errorMessage };
+      window.addEventListener('click', this.handleOutsideClick);
+    }
+  }
+
+  /**
+   * Handles clicks outside the popover to close it.
+   */
+  private handleOutsideClick = () => {
+    this.errorsPopoverDetails = null;
+    window.removeEventListener('click', this.handleOutsideClick);
+  }
+
+  /**
+   * Renders the popover if it exists.
+   */
+  private renderPopover() {
+    if (this.errorsPopoverDetails) {
+      const { x, y, message } = this.errorsPopoverDetails;
+      return html`
+        <div class="popover" style="top: ${y + 10}px; left: ${x + 10}px;">
+          ${message.split('; ').map(err => html`<div>${err}</div>`)}
+        </div>
+      `;
+    }
+    return null;
+  }
+
+  render() {
+    const columns = Object.keys(this.schema);
+    return html`
+      <table>
+        <thead>
+          <tr>
+            ${columns.map(column => html`
+              <th
+                @click="${() => this.handleSort(column)}"
+                class="${this.sortColumn === column ? `sort-${this.sortDirection}` : ''}"
+              >
+                ${this.schema[column].label}
+                <div>
+                  <input
+                    class="filter-input"
+                    type="text"
+                    placeholder="Filter"
+                    .value="${this.filters[column] || ''}"
+                    @input="${(e: Event) => this.handleFilterChange(e, column)}"
+                    @click="${(e: Event) => e.stopPropagation()}"
+                  />
+                </div>
+              </th>
+            `)}
+          </tr>
+        </thead>
+        <tbody>
+          ${this.filteredData.map((row, rowIndex) => html`
+            <tr>
+              ${columns.map(key => html`
+                <td>
+                  <input
+                    type="text"
+                    .value="${row[key] || ''}"
+                    class="${this.cellErrors[rowIndex]?.[key] ? 'error' : ''}"
+                    @input="${(e: Event) => this.handleInputChange(e, rowIndex, key)}"
+                    @click="${(e: MouseEvent) => this.showErrorsPopover(e, rowIndex, key)}"
+                  />
+                </td>
+              `)}
+            </tr>
+          `)}
+        </tbody>
+      </table>
+      ${this.renderPopover()}
+    `;
   }
 }
