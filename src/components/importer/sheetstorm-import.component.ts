@@ -33,6 +33,7 @@ export class SheetstormImport extends LitElement {
     }
     button {
       margin-top: 16px;
+      margin-bottom: 16px;
       padding: 8px 16px;
       margin-right: 8px;
     }
