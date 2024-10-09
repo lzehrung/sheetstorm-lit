@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "es2020",
-    "module": "es2020",
+    "target": "es2017",
+    "module": "ESNext",
     "moduleResolution": "node",
     "lib": [
       "es2020",
@@ -12,7 +12,13 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "experimentalDecorators": true
+    "experimentalDecorators": true,
+    "removeComments": true,
+    "plugins": [
+      {
+        "transform": "./transformer.config.js"
+      }
+    ]
   },
   "include": [
     "src/**/*"

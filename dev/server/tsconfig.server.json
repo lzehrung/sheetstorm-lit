@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "sourceRoot": "./",
+    "rootDir": "./",
+    "module": "commonjs", // Module system to use
+    "target": "esnext", // ECMAScript target version
+    "esModuleInterop": true, // Enable/disable emitting __importDefault for default imports
+    "sourceMap": true, // Generate source maps for debugging
+    "strict": true, // Enable strict type checking
+    "declaration": false, // Generate declaration files (.d.ts)
+    "noEmit": true
+  },
+  "include": [
+    "../../dist"
+  ],
+  "exclude": [
+    "../../node_modules", // Exclude the node_modules directory
+  ]
+}
